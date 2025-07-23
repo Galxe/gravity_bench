@@ -1,0 +1,26 @@
+# Gravity Bench Configuration File
+
+# Uniswap configuration file path
+contract_config_path = "deploy.json"
+target_tps = 10000
+nodes = [
+    { rpc_url = "http://localhost:8545", chain_id = 7771625 },
+]
+num_tokens=2
+enable_swap_token = false
+# Faucet and deployer account configuration
+[faucet]
+# Private key (example, please replace with real private key)
+private_key = "xxxxx"
+
+# Load testing account configuration
+[accounts]
+# Number of load testing accounts to generate
+num_accounts = 10000
+
+# Performance and stress configuration
+[performance]
+# Number of concurrent transaction sending tasks inside TxnConsumer
+num_senders = 1000
+# Maximum capacity of the transaction pool inside Consumer
+max_pool_size = 100000

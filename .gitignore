@@ -1,0 +1,16 @@
+/target
+Cargo.lock
+contracts/node_modules
+contracts/uniswap-lib
+contracts/v2-core
+contracts/v2-periphery
+contracts/package-lock.json
+contracts/package.json
+package-lock.json
+package.json
+node_modules
+deploy.json
+bench_config.toml
+log
+log.log
+*.log
