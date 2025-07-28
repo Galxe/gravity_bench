@@ -333,7 +333,7 @@ impl EthHttpCli {
         let idx = rand::thread_rng().gen_range(0..self.inner.len());
         tokio::time::timeout(Duration::from_secs(10), async {
             let pending_tx = self.inner[idx].send_raw_transaction(&tx_bytes).await?;
-            Ok(pending_tx.tx_hash().clone())
+            Ok(*pending_tx.tx_hash())
         })
         .await?
     }
@@ -352,7 +352,7 @@ impl EthHttpCli {
                 if rand::thread_rng().gen_bool(0.0001) {
                     println!("send_tx_envelope latency: {:?}", latency);
                 }
-                Ok(pending_tx.tx_hash().clone())
+                Ok(*pending_tx.tx_hash())
             })
             .await;
 

@@ -42,9 +42,9 @@ impl MempoolTracker {
             }
         }
         if total_pending + total_queued > self.max_pool_size {
-            producer_addr.do_send(PauseProducer::default());
+            producer_addr.do_send(PauseProducer);
         } else if total_pending + total_queued < self.max_pool_size / 2 {
-            producer_addr.do_send(ResumeProducer::default());
+            producer_addr.do_send(ResumeProducer);
         }
         Ok(())
     }

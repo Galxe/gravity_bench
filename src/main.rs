@@ -54,7 +54,7 @@ async fn test_uniswap(
             token,
             contract_config.get_router_address().unwrap(),
         );
-        let rx = run_plan(approve_token, &producer).await?;
+        let rx = run_plan(approve_token, producer).await?;
         rx_vec.push(rx);
     }
     for rx in rx_vec {
@@ -69,7 +69,7 @@ async fn test_uniswap(
             contract_config.get_router_address().unwrap(),
             tps,
         );
-        let _rx = run_plan(plan, &producer).await?;
+        let _rx = run_plan(plan, producer).await?;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
@@ -90,7 +90,7 @@ async fn test_erc20_transfer(
             account_addresses.clone(),
             tps,
         );
-        let _rx = run_plan(erc20_transfer, &producer).await?;
+        let _rx = run_plan(erc20_transfer, producer).await?;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }

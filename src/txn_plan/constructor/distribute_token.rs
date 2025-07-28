@@ -58,7 +58,7 @@ impl FromTxnConstructor for SwapEthToTokenConstructor {
             self.router_address,
             self.amount_out_min,
             path,
-            from_signer.address().clone(),
+            from_signer.address(),
             deadline,
             self.eth_amount_per_account,
             nonce,

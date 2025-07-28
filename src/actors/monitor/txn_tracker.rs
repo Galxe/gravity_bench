@@ -175,7 +175,7 @@ impl TxnTracker {
             info!("Plan {} status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
                 plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
             if tracker.produce_transactions != 0
-                && tracker.resolved_transactions as usize >= tracker.produce_transactions as usize
+                && tracker.resolved_transactions as usize >= tracker.produce_transactions
             {
                 let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
                 let status = if has_failures {
@@ -297,7 +297,7 @@ impl TxnTracker {
             }
         }
 
-        if failed_txns.len() > 0 {
+        if !failed_txns.is_empty() {
             debug!(
                 "Failed to get receipt for {} transactions",
                 failed_txns.len()

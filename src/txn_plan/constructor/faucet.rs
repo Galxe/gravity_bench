@@ -107,7 +107,7 @@ impl FaucetTreePlanBuilder {
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
                 let accounts = gen_account::gen_account(num_accounts_at_level).unwrap();
-                account_levels.push(accounts.values().map(|k| k.clone()).collect::<Vec<_>>());
+                account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }
 
