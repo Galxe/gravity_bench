@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::actors::consumer::Consumer;
-use crate::actors::monitor::monitor::ProduceTxns;
+use crate::actors::monitor::monitor_actor::ProduceTxns;
 use crate::actors::monitor::{
     Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, SubmissionResult,
     UpdateSubmissionResult,

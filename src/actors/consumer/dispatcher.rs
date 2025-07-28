@@ -17,7 +17,7 @@ pub trait Dispatcher: Send + Sync {
         txn_id: Uuid,
     ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)>;
 
-    async fn provider(&self, rpc: &String) -> Result<Arc<EthHttpCli>>;
+    async fn provider(&self, rpc: &str) -> Result<Arc<EthHttpCli>>;
 }
 
 /// Simple dispatcher that routes transactions based on txn_id modulo
@@ -57,11 +57,11 @@ impl Dispatcher for SimpleDispatcher {
         Ok((tx_hash, rpc_url))
     }
 
-    async fn provider(&self, rpc: &String) -> Result<Arc<EthHttpCli>> {
+    async fn provider(&self, rpc: &str) -> Result<Arc<EthHttpCli>> {
         let provider = self
             .providers
             .iter()
-            .find(|p| p.rpc().as_str() == rpc.as_str())
+            .find(|p| p.rpc().as_str() == rpc)
             .ok_or(anyhow::anyhow!("Provider not found"))?;
         Ok(provider.clone())
     }
