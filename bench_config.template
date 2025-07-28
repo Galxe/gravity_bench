@@ -12,6 +12,10 @@ enable_swap_token = false
 [faucet]
 # Private key (example, please replace with real private key)
 private_key = "xxxxx"
+# Faucet Level: Controls the depth of cascading faucet levels
+# Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
+# Value 0: Disables cascading, processes data directly
+faucet_level = 10 
 
 # Load testing account configuration
 [accounts]

@@ -12,7 +12,6 @@ use std::{
 };
 use tracing::info;
 
-const FAUCET_DEGREE: usize = 10;
 // Gas parameters must match the values used in the plan executor.
 const GAS_LIMIT: u64 = 100_000;
 const GAS_PRICE: u64 = 10_000_000_000; // 10 Gwei
@@ -31,11 +30,12 @@ pub struct FaucetTreePlanBuilder {
 impl FaucetTreePlanBuilder {
     pub fn new(
         faucet_balance: U256,
+        faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
     ) -> Self {
-        let degree = FAUCET_DEGREE;
+        let degree = faucet_level;
         let total_accounts = final_recipients.len();
         // total_levels represents the number of transfer stages.
         // e.g., total_levels = 2 means: Faucet -> L0 -> Final Recipients

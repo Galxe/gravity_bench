@@ -177,6 +177,7 @@ async fn main() -> Result<()> {
 
     info!("Initializing Faucet constructor...");
     let faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+        benchmark_config.faucet.faucet_level as usize,
         faucet_balance,
         &benchmark_config.faucet.private_key,
         faucet_start_nonce,
