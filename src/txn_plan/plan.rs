@@ -97,8 +97,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                                 plan_id: plan_id.clone(),
                             });
                             let tx_envelope =
-                                TxnBuilder::build_and_sign_transaction(tx_request, signer)
-                                    .unwrap();
+                                TxnBuilder::build_and_sign_transaction(tx_request, signer).unwrap();
                             SignedTxnWithMetadata {
                                 bytes: tx_envelope.encoded_2718(),
                                 metadata,
