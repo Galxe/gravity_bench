@@ -35,16 +35,14 @@ impl MempoolTracker {
         let _ = producer_addr;
         let mut total_pending = 0;
         let mut total_queued = 0;
-        for status in status {
-            if let Ok(status) = status {
-                total_pending += status.pending;
-                total_queued += status.queued;
-            }
+        for status in status.into_iter().flatten() {
+            total_pending += status.pending;
+            total_queued += status.queued;
         }
         if total_pending + total_queued > self.max_pool_size {
-            producer_addr.do_send(PauseProducer::default());
+            producer_addr.do_send(PauseProducer);
         } else if total_pending + total_queued < self.max_pool_size / 2 {
-            producer_addr.do_send(ResumeProducer::default());
+            producer_addr.do_send(ResumeProducer);
         }
         Ok(())
     }

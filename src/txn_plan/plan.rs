@@ -9,7 +9,8 @@ use crate::{
     },
 };
 use alloy::{
-    consensus::transaction::SignerRecoverable, eips::Encodable2718, primitives::Address, signers::local::PrivateKeySigner
+    consensus::transaction::SignerRecoverable, eips::Encodable2718, primitives::Address,
+    signers::local::PrivateKeySigner,
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -87,7 +88,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                         .into_par_iter()
                         .map(|(signer, address, nonce)| {
                             let tx_request = constructor
-                                .build_for_sender(&address, &signer, *nonce as u64)
+                                .build_for_sender(address, signer, *nonce as u64)
                                 .unwrap();
                             let metadata = Arc::new(TxnMetadata {
                                 from_account: address.clone(),
@@ -96,8 +97,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                                 plan_id: plan_id.clone(),
                             });
                             let tx_envelope =
-                                TxnBuilder::build_and_sign_transaction(tx_request, &signer)
-                                    .unwrap();
+                                TxnBuilder::build_and_sign_transaction(tx_request, signer).unwrap();
                             SignedTxnWithMetadata {
                                 bytes: tx_envelope.encoded_2718(),
                                 metadata,
@@ -187,21 +187,23 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                         .into_par_iter()
                         .flat_map(|(_signer, address, _nonce)| {
                             // Build transaction request
-                            let txs =
-                                constructor.build_for_receiver(&address, chain_id).unwrap();
-                            txs.into_iter().map(|tx_envelope| {
-                                let metadata = Arc::new(TxnMetadata {
-                                    from_account: Arc::new(tx_envelope.recover_signer_unchecked().unwrap()),
-                                    nonce: 0,
-                                    txn_id: Uuid::new_v4(),
-                                    plan_id: plan_id.clone(),
-                                });
-                                SignedTxnWithMetadata {
-                                    bytes: tx_envelope.encoded_2718(),
-                                    metadata,
-                                }
-                            })
-                            .collect::<Vec<_>>()
+                            let txs = constructor.build_for_receiver(address, chain_id).unwrap();
+                            txs.into_iter()
+                                .map(|tx_envelope| {
+                                    let metadata = Arc::new(TxnMetadata {
+                                        from_account: Arc::new(
+                                            tx_envelope.recover_signer_unchecked().unwrap(),
+                                        ),
+                                        nonce: 0,
+                                        txn_id: Uuid::new_v4(),
+                                        plan_id: plan_id.clone(),
+                                    });
+                                    SignedTxnWithMetadata {
+                                        bytes: tx_envelope.encoded_2718(),
+                                        metadata,
+                                    }
+                                })
+                                .collect::<Vec<_>>()
                         })
                         .collect::<Vec<_>>()
                 })

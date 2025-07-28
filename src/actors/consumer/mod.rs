@@ -1,3 +1,3 @@
-mod consumer;
+mod actor;
 mod dispatcher;
-pub use consumer::Consumer;
+pub use actor::Consumer;

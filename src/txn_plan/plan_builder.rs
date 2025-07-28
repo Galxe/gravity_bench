@@ -74,6 +74,7 @@ impl PlanBuilder {
 
     /// Create ETH distribution plan
     pub fn create_faucet_tree_plan_builder(
+        faucet_level: usize,
         faucet_account_balance: U256,
         faucet_private_key: &str,
         faucet_start_nonce: u64,
@@ -82,6 +83,7 @@ impl PlanBuilder {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
             faucet_account_balance,
+            faucet_level,
             faucet_signer,
             faucet_start_nonce,
             total_accounts,

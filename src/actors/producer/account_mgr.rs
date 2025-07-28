@@ -55,18 +55,16 @@ impl AccountManager {
                 self.ready_accounts = remaining;
                 result
             }
-            _ => {
-                std::mem::take(&mut self.ready_accounts)
-            }
+            _ => std::mem::take(&mut self.ready_accounts),
         }
     }
 
     pub(crate) fn retry_current_nonce(&mut self, account: Arc<Address>) {
-        if let Some(_) = self.account_status.get_mut(&account) {
+        if self.account_status.get_mut(&account).is_some() {
             self.ready_accounts.push((
                 self.account_signers.get(&account).unwrap().clone(),
                 account.clone(),
-                self.account_status.get(&account).unwrap().clone(),
+                *self.account_status.get(&account).unwrap(),
             ));
         }
     }
@@ -89,7 +87,7 @@ impl AccountManager {
             self.ready_accounts.push((
                 self.account_signers.get(&account).unwrap().clone(),
                 account.clone(),
-                self.account_status.get(&account).unwrap().clone(),
+                *self.account_status.get(&account).unwrap(),
             ));
         }
     }

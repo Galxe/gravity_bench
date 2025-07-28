@@ -1,6 +1,6 @@
 mod mempool_tracker;
 
-pub mod monitor;
+pub mod monitor_actor;
 mod txn_tracker;
 
 use actix::Message;
@@ -60,4 +60,4 @@ pub struct PlanFailed {
     pub reason: String,
 }
 
-pub use monitor::Monitor;
+pub use monitor_actor::Monitor;

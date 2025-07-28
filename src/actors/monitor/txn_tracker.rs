@@ -109,10 +109,7 @@ impl TxnTracker {
 
     /// Register new plan (no changes)
     pub fn register_plan(&mut self, plan_id: PlanId) {
-        info!(
-            "Plan registered: plan_id={}",
-            plan_id
-        );
+        info!("Plan registered: plan_id={}", plan_id);
         let tracker = PlanTracker {
             produce_transactions: 0,
             resolved_transactions: 0,
@@ -177,7 +174,9 @@ impl TxnTracker {
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
             info!("Plan {} status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
                 plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
-            if tracker.produce_transactions != 0 && tracker.resolved_transactions as usize >= tracker.produce_transactions as usize {
+            if tracker.produce_transactions != 0
+                && tracker.resolved_transactions as usize >= tracker.produce_transactions
+            {
                 let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
                 let status = if has_failures {
                     let reason = format!(
@@ -250,7 +249,10 @@ impl TxnTracker {
 
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
-                    debug!("checked tx_hash={:?} result={:?}", task_info.tx_hash, result);
+                    debug!(
+                        "checked tx_hash={:?} result={:?}",
+                        task_info.tx_hash, result
+                    );
                     (task_info, result)
                 };
                 tasks.push(task);
@@ -295,7 +297,7 @@ impl TxnTracker {
             }
         }
 
-        if failed_txns.len() > 0 {
+        if !failed_txns.is_empty() {
             debug!(
                 "Failed to get receipt for {} transactions",
                 failed_txns.len()

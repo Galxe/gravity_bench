@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::actors::consumer::Consumer;
-use crate::actors::monitor::monitor::ProduceTxns;
+use crate::actors::monitor::monitor_actor::ProduceTxns;
 use crate::actors::monitor::{
     Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, SubmissionResult,
     UpdateSubmissionResult,
@@ -93,7 +93,7 @@ impl Producer {
     /// allow a waiting plan to proceed (e.g., a plan completes, an account becomes ready).
     fn trigger_next_plan_if_needed(&self, ctx: &mut Context<Self>) {
         if self.state == State::Running && !self.plan_queue.is_empty() {
-            ctx.address().do_send(ExeFrontPlan::default());
+            ctx.address().do_send(ExeFrontPlan);
         }
     }
 
@@ -221,7 +221,7 @@ impl Handler<ExeFrontPlan> for Producer {
             async move {
                 // Check if the plan is ready to be executed.
                 let is_ready =
-                    Self::check_plan_ready(&plan.execution_mode(), &account_manager).await;
+                    Self::check_plan_ready(plan.execution_mode(), &account_manager).await;
 
                 if !is_ready {
                     // If not ready, return the plan so it can be put back at the front of the queue.

@@ -77,12 +77,11 @@ impl RateLimiter {
         let current = self.current_tokens.load(Ordering::Relaxed);
         if current > 0 {
             // Try to atomically decrement
-            if self.current_tokens.compare_exchange_weak(
-                current, 
-                current - 1, 
-                Ordering::Relaxed, 
-                Ordering::Relaxed
-            ).is_ok() {
+            if self
+                .current_tokens
+                .compare_exchange_weak(current, current - 1, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
                 return true;
             }
         }
@@ -125,7 +124,10 @@ impl RateLimiter {
 
     /// Get current status
     pub fn get_status(&self) -> (u32, u32) {
-        (self.current_tokens.load(Ordering::Relaxed) as u32, self.bucket_capacity)
+        (
+            self.current_tokens.load(Ordering::Relaxed) as u32,
+            self.bucket_capacity,
+        )
     }
 }
 
@@ -219,7 +221,11 @@ impl Consumer {
                 Ok((tx_hash, rpc_url)) => {
                     debug!(
                         "Txn {:?} sent successfully on attempt {}. Hash: {:?}/{:?}, RPC: {}",
-                        metadata.txn_id, attempt, tx_hash, keccak256(&signed_txn.bytes), rpc_url
+                        metadata.txn_id,
+                        attempt,
+                        tx_hash,
+                        keccak256(&signed_txn.bytes),
+                        rpc_url
                     );
                     monitor_addr.do_send(UpdateSubmissionResult {
                         metadata,
@@ -261,7 +267,13 @@ impl Consumer {
                         || error_string.contains("invalid nonce")
                     {
                         // Check current on-chain nonce to determine final state
-                        if let Ok(next_nonce) = dispatcher.provider(&url).await.unwrap().get_nonce(*metadata.from_account.as_ref()).await {
+                        if let Ok(next_nonce) = dispatcher
+                            .provider(&url)
+                            .await
+                            .unwrap()
+                            .get_nonce(*metadata.from_account.as_ref())
+                            .await
+                        {
                             // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated
                             if next_nonce > metadata.nonce {
                                 // Try to find the hash of the transaction using our nonce
@@ -347,7 +359,7 @@ impl Consumer {
         let transactions_sending = self.stats.transactions_sending.clone();
         let rate_limiter = self.rate_limiter.clone();
         let rate_limited_count = self.stats.transactions_rate_limited.clone();
-        
+
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
@@ -379,7 +391,6 @@ impl Consumer {
                                     debug!("Rate limited, waiting {:?} before processing txn {:?}", wait_time, signed_txn.metadata.txn_id);
                                     rate_limited_count.fetch_add(1, Ordering::Relaxed);
                                     tokio::time::sleep(wait_time).await;
-                                    
                                     // Try again after waiting
                                     if !rate_limiter.try_acquire() {
                                         // Still rate limited after waiting, this shouldn't happen often
@@ -435,7 +446,7 @@ impl Actor for Consumer {
         self.monitor_addr.do_send(RegisterConsumer {
             addr: ctx.address(),
         });
-        
+
         let rate_limiter = self.rate_limiter.clone();
         ctx.run_interval(Duration::from_secs(5), move |act, _ctx| {
             let (current_tokens, bucket_capacity) = rate_limiter.get_status();
