@@ -7,7 +7,5 @@ pub mod plan;
 pub mod plan_builder;
 pub mod traits;
 
-
-
 pub use plan_builder::PlanBuilder;
 pub use traits::*;

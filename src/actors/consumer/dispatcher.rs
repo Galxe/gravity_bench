@@ -11,9 +11,13 @@ use crate::eth::EthHttpCli;
 pub trait Dispatcher: Send + Sync {
     /// Send a transaction envelope to a provider selected by the dispatcher
     /// Returns (TxHash, RPC URL) on success
-    async fn send_tx(&self, tx_bytes: Vec<u8>, txn_id: Uuid) -> std::result::Result<(TxHash, String), (anyhow::Error, String)>;
+    async fn send_tx(
+        &self,
+        tx_bytes: Vec<u8>,
+        txn_id: Uuid,
+    ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)>;
 
-    async fn provider(&self, rpc: &String) -> Result<Arc<EthHttpCli>> ;
+    async fn provider(&self, rpc: &String) -> Result<Arc<EthHttpCli>>;
 }
 
 /// Simple dispatcher that routes transactions based on txn_id modulo
@@ -38,16 +42,27 @@ impl SimpleDispatcher {
 
 #[async_trait]
 impl Dispatcher for SimpleDispatcher {
-    async fn send_tx(&self, bytes: Vec<u8>, txn_id: Uuid) -> std::result::Result<(TxHash, String), (anyhow::Error, String)> {
+    async fn send_tx(
+        &self,
+        bytes: Vec<u8>,
+        txn_id: Uuid,
+    ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)> {
         let provider = self.select_provider(txn_id);
         let rpc_url = provider.rpc().as_ref().clone();
-        let tx_hash = provider.send_raw_tx(bytes).await.map_err(|e| (e, provider.rpc().as_ref().clone()))?;
-        
+        let tx_hash = provider
+            .send_raw_tx(bytes)
+            .await
+            .map_err(|e| (e, provider.rpc().as_ref().clone()))?;
+
         Ok((tx_hash, rpc_url))
     }
 
     async fn provider(&self, rpc: &String) -> Result<Arc<EthHttpCli>> {
-        let provider = self.providers.iter().find(|p| p.rpc().as_str() == rpc.as_str()).ok_or(anyhow::anyhow!("Provider not found"))?;
+        let provider = self
+            .providers
+            .iter()
+            .find(|p| p.rpc().as_str() == rpc.as_str())
+            .ok_or(anyhow::anyhow!("Provider not found"))?;
         Ok(provider.clone())
     }
 }

@@ -1,11 +1,13 @@
 use crate::{
     eth::TxnBuilder,
-    txn_plan::traits::{
-        PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan,
-    },
+    txn_plan::traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
 };
 use alloy::{
-    eips::Encodable2718, network::TransactionBuilder, primitives::{Address, U256}, rpc::types::TransactionRequest, signers::local::PrivateKeySigner
+    eips::Encodable2718,
+    network::TransactionBuilder,
+    primitives::{Address, U256},
+    rpc::types::TransactionRequest,
+    signers::local::PrivateKeySigner,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{
@@ -170,4 +172,4 @@ impl TxnPlan for LevelFaucetPlan {
             consume_nonce: false,
         })
     }
-} 
+}

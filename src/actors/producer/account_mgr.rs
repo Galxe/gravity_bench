@@ -55,9 +55,7 @@ impl AccountManager {
                 self.ready_accounts = remaining;
                 result
             }
-            _ => {
-                std::mem::take(&mut self.ready_accounts)
-            }
+            _ => std::mem::take(&mut self.ready_accounts),
         }
     }
 
