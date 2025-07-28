@@ -35,11 +35,14 @@ impl FaucetTreePlanBuilder {
         start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
     ) -> Self {
-        let degree = faucet_level;
+        let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
         // total_levels represents the number of transfer stages.
         // e.g., total_levels = 2 means: Faucet -> L0 -> Final Recipients
         // This requires 1 intermediate account layer.
+        if degree == 0 {
+            degree = total_accounts;
+        }
         let total_levels = Self::calculate_levels(total_accounts, degree);
 
         let degree_u256 = U256::from(degree);
