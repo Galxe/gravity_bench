@@ -4,6 +4,8 @@ import re
 from web3 import Web3
 from solcx import compile_files, install_solc, set_solc_version
 
+solc_version = "0.5.16"
+
 def calculate_init_code_hash():
     """Calculate the correct INIT_CODE_HASH"""
     print("🔨 Calculating correct INIT_CODE_HASH...")
@@ -12,7 +14,7 @@ def calculate_init_code_hash():
         # 1. Compile UniswapV2Pair contract
         print("   Compiling UniswapV2Pair contract...")
         
-        set_solc_version("0.5.16")
+        set_solc_version(solc_version)
         pair_path = os.path.abspath('contracts/v2-core/contracts/UniswapV2Pair.sol')
         
         pair_compiled = compile_files(
@@ -20,7 +22,7 @@ def calculate_init_code_hash():
             output_values=['abi', 'bin'],
             optimize=True,
             optimize_runs=999999, 
-            solc_version="0.5.16"
+            solc_version=solc_version
         )
         
         # 2. Get creation bytecode
@@ -182,7 +184,7 @@ def main():
     print("=" * 50)
     
     # Install Solidity compiler
-    install_solc("0.5.16")
+    internal_install_solc(solc_version)
     
     # Calculate correct hash
     correct_hash = calculate_init_code_hash()
@@ -212,7 +214,7 @@ def main():
     else:
         print(f"\n❌ Failed to calculate INIT_CODE_HASH")
 
-def install_solc(version):
+def internal_install_solc(version):
     """Install specified version of Solidity compiler"""
     try:
         install_solc(version)
