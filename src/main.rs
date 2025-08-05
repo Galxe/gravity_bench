@@ -4,12 +4,12 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::Result;
-use tokio::io::AsyncWriteExt;
 use std::{
     process::{Command, Output},
     str::FromStr,
     sync::Arc,
 };
+use tokio::io::AsyncWriteExt;
 use tracing::{info, Level};
 
 use crate::{
@@ -134,7 +134,16 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
         for account in accounts_clone.iter() {
-            file.write(format!("{}, {}\n", account.0.to_string(), hex::encode(account.1.credential().to_bytes().as_slice())).as_bytes()).await.unwrap();
+            file.write(
+                format!(
+                    "{}, {}\n",
+                    account.0.to_string(),
+                    hex::encode(account.1.credential().to_bytes().as_slice())
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
         }
     });
     let account_addresses = Arc::new(
