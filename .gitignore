@@ -14,3 +14,4 @@ bench_config.toml
 log
 log.log
 *.log
+accounts.txt
