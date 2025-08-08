@@ -16,7 +16,10 @@ use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
-    txn_plan::{PlanBuilder, TxnPlan},
+    txn_plan::{
+        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder},
+        PlanBuilder, TxnPlan,
+    },
     util::gen_account::gen_account,
 };
 
@@ -199,6 +202,7 @@ async fn main() -> Result<()> {
         &benchmark_config.faucet.private_key,
         faucet_start_nonce,
         account_addresses.clone(),
+        Arc::new(EthFaucetTxnBuilder),
     )
     .unwrap();
 
@@ -225,19 +229,45 @@ async fn main() -> Result<()> {
     info!("All faucet distribution levels are complete.");
 
     let all_token_addresses = contract_config.get_all_token_addresses();
-    let token_balance = U256::from(1e18);
+    let token_balance = U256::from(10_u128.pow(30)); // A large amount of tokens to distribute
+    let faucet_signer_for_token =
+        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+
     for token in &all_token_addresses {
         info!("distributing token: {}", token);
-        let distribute_token = PlanBuilder::swap_eth_to_token(
-            contract_config.get_router_address().unwrap(),
-            *token,
-            contract_config.get_weth_address().unwrap(),
+
+        let faucet_current_nonce = eth_clients[0]
+            .get_transaction_count(faucet_signer_for_token.address())
+            .await
+            .unwrap();
+
+        let faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+            benchmark_config.faucet.faucet_level as usize,
             token_balance,
-            U256::from(0),
-            benchmark_config.nodes[0].chain_id,
+            &benchmark_config.faucet.private_key,
+            faucet_current_nonce,
+            account_addresses.clone(),
+            Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+        )
+        .unwrap();
+
+        let total_faucet_levels = faucet_builder.total_levels();
+        info!(
+            "Token faucet for {} will proceed in {} levels.",
+            token, total_faucet_levels
         );
-        let rx = run_plan(distribute_token, &producer).await?;
-        rx.await??;
+
+        for level in 0..total_faucet_levels {
+            info!("Starting token faucet for {} LEVEL {}...", token, level);
+            let faucet_level_plan = faucet_builder.create_plan_for_level(level, chain_id);
+            let rx = run_plan(faucet_level_plan, &producer).await?;
+            rx.await??;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            info!(
+                "Token faucet for {} LEVEL {} completed successfully.",
+                token, level
+            );
+        }
     }
     let tps = benchmark_config.target_tps as usize;
     if benchmark_config.enable_swap_token {

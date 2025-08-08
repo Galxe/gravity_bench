@@ -1,5 +1,5 @@
 use crate::{
-    txn_plan::{faucet_plan::LevelFaucetPlan, traits::TxnPlan},
+    txn_plan::{faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan},
     util::gen_account,
 };
 use alloy::{
@@ -8,6 +8,7 @@ use alloy::{
 };
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
 use tracing::info;
@@ -16,7 +17,7 @@ use tracing::info;
 const GAS_LIMIT: u64 = 100_000;
 const GAS_PRICE: u64 = 10_000_000_000; // 10 Gwei
 
-pub struct FaucetTreePlanBuilder {
+pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     faucet: Arc<PrivateKeySigner>,
     account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
     final_recipients: Arc<Vec<Arc<Address>>>,
@@ -25,15 +26,18 @@ pub struct FaucetTreePlanBuilder {
     intermediate_funding_amounts: Vec<U256>,
     degree: usize,
     total_levels: usize,
+    txn_builder: Arc<T>,
+    _phantom: PhantomData<T>,
 }
 
-impl FaucetTreePlanBuilder {
+impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub fn new(
         faucet_balance: U256,
         faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
+        txn_builder: Arc<T>,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -128,6 +132,8 @@ impl FaucetTreePlanBuilder {
             intermediate_funding_amounts,
             degree,
             total_levels,
+            txn_builder,
+            _phantom: PhantomData,
         }
     }
 
@@ -184,6 +190,7 @@ impl FaucetTreePlanBuilder {
             self.degree,
             self.nonce_map.clone(),
             is_final_level,
+            self.txn_builder.clone(),
         );
         Box::new(plan)
     }

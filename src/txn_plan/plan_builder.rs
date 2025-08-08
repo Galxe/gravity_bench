@@ -12,6 +12,7 @@ use crate::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
             SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
         },
+        faucet_txn_builder::FaucetTxnBuilder,
         plan::ManyToOnePlan,
         traits::PlanExecutionMode,
         TxnPlan,
@@ -73,13 +74,14 @@ impl PlanBuilder {
     }
 
     /// Create ETH distribution plan
-    pub fn create_faucet_tree_plan_builder(
+    pub fn create_faucet_tree_plan_builder<T: FaucetTxnBuilder + 'static>(
         faucet_level: usize,
         faucet_account_balance: U256,
         faucet_private_key: &str,
         faucet_start_nonce: u64,
         total_accounts: Arc<Vec<Arc<Address>>>,
-    ) -> Result<Arc<FaucetTreePlanBuilder>, anyhow::Error> {
+        txn_builder: Arc<T>,
+    ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
             faucet_account_balance,
@@ -87,6 +89,7 @@ impl PlanBuilder {
             faucet_signer,
             faucet_start_nonce,
             total_accounts,
+            txn_builder,
         );
         Ok(Arc::new(constructor))
     }
