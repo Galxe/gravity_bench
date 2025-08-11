@@ -43,6 +43,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
+        remained_eth: U256,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -69,8 +70,10 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let total_txns = intermediate_txns + final_txns;
             let total_gas_cost = U256::from(total_txns) * gas_cost_per_txn;
 
-            let amount_for_leaves = if faucet_balance > total_gas_cost {
-                faucet_balance - total_gas_cost
+            let total_remained_eth = U256::from(intermediate_txns) * remained_eth;
+            let total_cost = total_gas_cost + total_remained_eth;
+            let amount_for_leaves = if faucet_balance > total_cost {
+                faucet_balance - total_cost
             } else {
                 U256::ZERO
             };
@@ -86,12 +89,13 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             // Amount for the last intermediate level to send to final recipients.
             intermediate_funding_amounts[num_intermediate_levels - 1] =
-                degree_u256 * (amount_per_recipient + gas_cost_per_txn);
+                degree_u256 * (amount_per_recipient + gas_cost_per_txn) + remained_eth;
 
             // Work backwards to calculate funding for previous levels.
             for i in (0..num_intermediate_levels - 1).rev() {
                 intermediate_funding_amounts[i] =
-                    degree_u256 * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn);
+                    degree_u256 * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn)
+                        + remained_eth;
             }
             (amount_per_recipient, intermediate_funding_amounts)
         } else {

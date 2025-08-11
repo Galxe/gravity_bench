@@ -234,6 +234,7 @@ async fn main() -> Result<()> {
         faucet_start_nonce,
         account_addresses.clone(),
         Arc::new(EthFaucetTxnBuilder),
+        U256::from(benchmark_config.num_tokens) * U256::from(21000) * U256::from(1000_000_000_000u64),
     )
     .unwrap();
     execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
@@ -258,6 +259,7 @@ async fn main() -> Result<()> {
             faucet_current_nonce,
             account_addresses.clone(),
             Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+            U256::ZERO,
         )
         .unwrap();
 
