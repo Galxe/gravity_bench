@@ -1,5 +1,7 @@
 use crate::{
-    txn_plan::{faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan},
+    txn_plan::{
+        faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
+    },
     util::gen_account,
 };
 use alloy::{
@@ -15,7 +17,10 @@ use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.
 const GAS_LIMIT: u64 = 100_000;
-const GAS_PRICE: u64 = 10_000_000_000; // 10 Gwei
+const GAS_PRICE: u64 = 1000_000_000_000; // 1000 Gwei
+
+static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
+    std::sync::OnceLock::new();
 
 pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     faucet: Arc<PrivateKeySigner>,
@@ -120,11 +125,19 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             }
         }
 
-        let mut nonce_map = HashMap::new();
-        nonce_map.insert(faucet.address(), Arc::new(AtomicU64::new(start_nonce)));
-        for level in &account_levels {
-            for acc in level {
-                nonce_map.insert(acc.address(), Arc::new(AtomicU64::new(0)));
+        let nonce_map_arc = NONCE_MAP.get_or_init(|| Arc::new(Mutex::new(HashMap::new())));
+        {
+            let mut nonce_map = nonce_map_arc.lock().unwrap();
+            nonce_map
+                .entry(faucet.address())
+                .or_insert_with(|| Arc::new(AtomicU64::new(start_nonce)));
+
+            for level in &account_levels {
+                for acc in level {
+                    nonce_map
+                        .entry(acc.address())
+                        .or_insert_with(|| Arc::new(AtomicU64::new(0)));
+                }
             }
         }
         info!("FaucetTreePlanBuilder: balance={:?}, amount_per_recipient={:?}, intermediate_funding_amounts={:?}, accounts_levels={:?}, accounts_num={:?}", faucet_balance, amount_per_recipient, intermediate_funding_amounts, account_levels.len(), total_accounts);
@@ -133,7 +146,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             account_levels,
             final_recipients,
             amount_per_recipient,
-            nonce_map: Arc::new(Mutex::new(nonce_map)),
+            nonce_map: nonce_map_arc.clone(),
             intermediate_funding_amounts,
             degree,
             total_levels,

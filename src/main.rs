@@ -239,7 +239,7 @@ async fn main() -> Result<()> {
     execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
 
     let all_token_addresses = contract_config.get_all_token_addresses();
-    let token_balance = U256::from(10_u128.pow(30)); // A large amount of tokens to distribute
+    let token_balance = U256::from_str(&benchmark_config.faucet.init_token_balance).unwrap(); // A large amount of tokens to distribute
     let faucet_signer_for_token =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
