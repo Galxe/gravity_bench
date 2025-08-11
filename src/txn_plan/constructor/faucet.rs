@@ -108,9 +108,14 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let mut account_levels = vec![];
         if total_levels > 1 {
             let num_intermediate_levels = total_levels - 1;
+            let mut seed_offset: u64 = 0;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let accounts = gen_account::gen_account(num_accounts_at_level).unwrap();
+                let seeds: Vec<u64> = (0..num_accounts_at_level as u64)
+                    .map(|i| seed_offset + i)
+                    .collect();
+                seed_offset += num_accounts_at_level as u64;
+                let accounts = gen_account::gen_deterministic_accounts(&seeds).unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }
