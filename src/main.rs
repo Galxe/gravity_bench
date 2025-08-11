@@ -14,10 +14,12 @@ use tracing::{info, Level};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
-    config::{BenchConfig, ContractConfig},
+    config::{BenchConfig, ContractConfig, IERC20},
     eth::EthHttpCli,
     txn_plan::{
-        constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}, PlanBuilder, TxnPlan
+        constructor::FaucetTreePlanBuilder,
+        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
+        PlanBuilder, TxnPlan,
     },
     util::gen_account::gen_account,
 };
@@ -69,7 +71,10 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
             faucet_name, level
         );
     }
-    info!("All {} faucet distribution levels are complete.", faucet_name);
+    info!(
+        "All {} faucet distribution levels are complete.",
+        faucet_name
+    );
     Ok(())
 }
 
@@ -234,13 +239,14 @@ async fn main() -> Result<()> {
         faucet_start_nonce,
         account_addresses.clone(),
         Arc::new(EthFaucetTxnBuilder),
-        U256::from(benchmark_config.num_tokens) * U256::from(21000) * U256::from(1000_000_000_000u64),
+        U256::from(benchmark_config.num_tokens)
+            * U256::from(21000)
+            * U256::from(1000_000_000_000u64),
     )
     .unwrap();
     execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
 
     let all_token_addresses = contract_config.get_all_token_addresses();
-    let token_balance = U256::from_str(&benchmark_config.faucet.init_token_balance).unwrap(); // A large amount of tokens to distribute
     let faucet_signer_for_token =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
@@ -251,10 +257,17 @@ async fn main() -> Result<()> {
             .get_transaction_count(faucet_signer_for_token.address())
             .await
             .unwrap();
+        let balance = IERC20::new(*token, eth_clients[0].provider())
+            .balanceOf(faucet_signer_for_token.address())
+            .call()
+            .await
+            .unwrap();
+
+        info!("balance of token: {}", balance);
 
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            token_balance,
+            balance,
             &benchmark_config.faucet.private_key,
             faucet_current_nonce,
             account_addresses.clone(),

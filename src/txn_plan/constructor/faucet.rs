@@ -71,14 +71,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             let total_remained_eth = U256::from(intermediate_txns) * remained_eth;
             let total_cost = total_gas_cost + total_remained_eth;
-            let amount_for_leaves =
-                if txn_builder.subtracts_gas_from_balance() && faucet_balance > total_cost {
-                    faucet_balance - total_cost
-                } else if !txn_builder.subtracts_gas_from_balance() {
-                    faucet_balance
-                } else {
-                    panic!("Faucet balance is not enough to cover the gas cost");
-                };
+            let amount_for_leaves = faucet_balance - total_cost;
 
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
@@ -95,28 +88,21 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             // Work backwards to calculate funding for previous levels.
             for i in (0..num_intermediate_levels - 1).rev() {
-                intermediate_funding_amounts[i] =
-                    degree_u256 * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn)
-                        + remained_eth;
+                intermediate_funding_amounts[i] = degree_u256
+                    * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn)
+                    + remained_eth;
             }
             (amount_per_recipient, intermediate_funding_amounts)
         } else {
             // No intermediate levels needed, direct distribution from faucet.
             let total_gas_cost = U256::from(total_accounts) * gas_cost_per_txn;
-            let amount_for_leaves = if txn_builder.subtracts_gas_from_balance()
-                && faucet_balance > total_gas_cost
-            {
-                faucet_balance - total_gas_cost
-            } else if !txn_builder.subtracts_gas_from_balance() {
-                faucet_balance
-            } else {
-                U256::ZERO
-            };
+            let amount_for_leaves = faucet_balance - total_gas_cost;
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
             } else {
-                U256::ZERO
+                panic!("Total accounts is 0");
             };
+
             (amount_per_recipient, Vec::new())
         };
 
