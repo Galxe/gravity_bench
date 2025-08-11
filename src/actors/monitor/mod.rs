@@ -28,6 +28,7 @@ pub struct RegisterPlan {
     pub plan_id: PlanId,
 }
 
+#[derive(Debug)]
 pub enum SubmissionResult {
     NonceTooLow((u64, TxHash)),
     ErrorWithRetry,

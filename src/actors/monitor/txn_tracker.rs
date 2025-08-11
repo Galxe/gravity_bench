@@ -152,14 +152,14 @@ impl TxnTracker {
                 };
                 self.pending_txns.insert(pending_info);
                 warn!(
-                    "Transaction submission failed: plan_id={}, nonce={}, tx_hash={:?}",
+                    "Transaction submission failed because nonce is too low: plan_id={}, nonce={}, tx_hash={:?}",
                     plan_id, nonce, tx_hash
                 );
             }
-            _ => {
+            e => {
                 warn!(
-                    "Transaction submission failed: plan_id={}, error=nonce_error",
-                    plan_id
+                    "Transaction submission failed: plan_id={}, error={:?}",
+                    plan_id, e
                 );
                 if let Some(tracker) = self.plan_trackers.get_mut(plan_id) {
                     tracker.resolved_transactions += 1;

@@ -1,5 +1,7 @@
 use crate::{
-    txn_plan::{faucet_plan::LevelFaucetPlan, traits::TxnPlan},
+    txn_plan::{
+        faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
+    },
     util::gen_account,
 };
 use alloy::{
@@ -8,15 +10,18 @@ use alloy::{
 };
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
 use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.
-const GAS_LIMIT: u64 = 100_000;
-const GAS_PRICE: u64 = 10_000_000_000; // 10 Gwei
+const GAS_PRICE: u64 = 2100000000000000; // 210 Gwei
 
-pub struct FaucetTreePlanBuilder {
+static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
+    std::sync::OnceLock::new();
+
+pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     faucet: Arc<PrivateKeySigner>,
     account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
     final_recipients: Arc<Vec<Arc<Address>>>,
@@ -25,15 +30,19 @@ pub struct FaucetTreePlanBuilder {
     intermediate_funding_amounts: Vec<U256>,
     degree: usize,
     total_levels: usize,
+    txn_builder: Arc<T>,
+    _phantom: PhantomData<T>,
 }
 
-impl FaucetTreePlanBuilder {
+impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub fn new(
         faucet_balance: U256,
         faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
+        txn_builder: Arc<T>,
+        remained_eth: U256,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -46,7 +55,7 @@ impl FaucetTreePlanBuilder {
         let total_levels = Self::calculate_levels(total_accounts, degree);
 
         let degree_u256 = U256::from(degree);
-        let gas_cost_per_txn = U256::from(GAS_LIMIT) * U256::from(GAS_PRICE);
+        let gas_cost_per_txn = U256::from(GAS_PRICE);
 
         let (amount_per_recipient, intermediate_funding_amounts) = if total_levels > 1 {
             // This is a multi-level distribution.
@@ -60,16 +69,14 @@ impl FaucetTreePlanBuilder {
             let total_txns = intermediate_txns + final_txns;
             let total_gas_cost = U256::from(total_txns) * gas_cost_per_txn;
 
-            let amount_for_leaves = if faucet_balance > total_gas_cost {
-                faucet_balance - total_gas_cost
-            } else {
-                U256::ZERO
-            };
+            let total_remained_eth = U256::from(intermediate_txns) * remained_eth;
+            let total_cost = total_gas_cost + total_remained_eth;
+            let amount_for_leaves = faucet_balance - total_cost;
 
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
             } else {
-                U256::ZERO
+                panic!("Total accounts is 0");
             };
 
             let num_intermediate_levels = total_levels - 1;
@@ -77,45 +84,56 @@ impl FaucetTreePlanBuilder {
 
             // Amount for the last intermediate level to send to final recipients.
             intermediate_funding_amounts[num_intermediate_levels - 1] =
-                degree_u256 * (amount_per_recipient + gas_cost_per_txn);
+                degree_u256 * (amount_per_recipient + gas_cost_per_txn) + remained_eth;
 
             // Work backwards to calculate funding for previous levels.
             for i in (0..num_intermediate_levels - 1).rev() {
-                intermediate_funding_amounts[i] =
-                    degree_u256 * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn);
+                intermediate_funding_amounts[i] = degree_u256
+                    * (intermediate_funding_amounts[i + 1] + gas_cost_per_txn)
+                    + remained_eth;
             }
             (amount_per_recipient, intermediate_funding_amounts)
         } else {
             // No intermediate levels needed, direct distribution from faucet.
             let total_gas_cost = U256::from(total_accounts) * gas_cost_per_txn;
-            let amount_for_leaves = if faucet_balance > total_gas_cost {
-                faucet_balance - total_gas_cost
-            } else {
-                U256::ZERO
-            };
+            let amount_for_leaves = faucet_balance - total_gas_cost;
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
             } else {
-                U256::ZERO
+                panic!("Total accounts is 0");
             };
+
             (amount_per_recipient, Vec::new())
         };
 
         let mut account_levels = vec![];
         if total_levels > 1 {
             let num_intermediate_levels = total_levels - 1;
+            let mut seed_offset: u64 = 0;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let accounts = gen_account::gen_account(num_accounts_at_level).unwrap();
+                let seeds: Vec<u64> = (0..num_accounts_at_level as u64)
+                    .map(|i| seed_offset + i)
+                    .collect();
+                seed_offset += num_accounts_at_level as u64;
+                let accounts = gen_account::gen_deterministic_accounts(&seeds).unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }
 
-        let mut nonce_map = HashMap::new();
-        nonce_map.insert(faucet.address(), Arc::new(AtomicU64::new(start_nonce)));
-        for level in &account_levels {
-            for acc in level {
-                nonce_map.insert(acc.address(), Arc::new(AtomicU64::new(0)));
+        let nonce_map_arc = NONCE_MAP.get_or_init(|| Arc::new(Mutex::new(HashMap::new())));
+        {
+            let mut nonce_map = nonce_map_arc.lock().unwrap();
+            nonce_map
+                .entry(faucet.address())
+                .or_insert_with(|| Arc::new(AtomicU64::new(start_nonce)));
+
+            for level in &account_levels {
+                for acc in level {
+                    nonce_map
+                        .entry(acc.address())
+                        .or_insert_with(|| Arc::new(AtomicU64::new(0)));
+                }
             }
         }
         info!("FaucetTreePlanBuilder: balance={:?}, amount_per_recipient={:?}, intermediate_funding_amounts={:?}, accounts_levels={:?}, accounts_num={:?}", faucet_balance, amount_per_recipient, intermediate_funding_amounts, account_levels.len(), total_accounts);
@@ -124,10 +142,12 @@ impl FaucetTreePlanBuilder {
             account_levels,
             final_recipients,
             amount_per_recipient,
-            nonce_map: Arc::new(Mutex::new(nonce_map)),
+            nonce_map: nonce_map_arc.clone(),
             intermediate_funding_amounts,
             degree,
             total_levels,
+            txn_builder,
+            _phantom: PhantomData,
         }
     }
 
@@ -184,6 +204,7 @@ impl FaucetTreePlanBuilder {
             self.degree,
             self.nonce_map.clone(),
             is_final_level,
+            self.txn_builder.clone(),
         );
         Box::new(plan)
     }

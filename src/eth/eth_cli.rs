@@ -127,6 +127,10 @@ impl EthHttpCli {
         Ok(txn_sender)
     }
 
+    pub fn provider(&self) -> Arc<RootProvider<Ethereum>> {
+        self.inner[0].clone()
+    }
+
     pub fn chain_id(&self) -> u64 {
         self.chain_id
     }

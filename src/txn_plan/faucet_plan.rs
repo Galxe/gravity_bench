@@ -1,17 +1,19 @@
 use crate::{
     eth::TxnBuilder,
-    txn_plan::traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
+    txn_plan::{
+        faucet_txn_builder::FaucetTxnBuilder,
+        traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
+    },
 };
 use alloy::{
     eips::Encodable2718,
-    network::TransactionBuilder,
     primitives::{Address, U256},
-    rpc::types::TransactionRequest,
     signers::local::PrivateKeySigner,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{
     collections::HashMap,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -23,7 +25,7 @@ use super::TxnIter;
 
 const DEFAULT_CONCURRENCY_LIMIT: usize = 256;
 
-pub struct LevelFaucetPlan {
+pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     id: PlanId,
     execution_mode: PlanExecutionMode,
     chain_id: u64,
@@ -37,9 +39,11 @@ pub struct LevelFaucetPlan {
     nonce_map: Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>,
     is_final_level: bool,
     concurrency_limit: usize,
+    txn_builder: Arc<T>,
+    _phantom: PhantomData<T>,
 }
 
-impl LevelFaucetPlan {
+impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain_id: u64,
@@ -52,6 +56,7 @@ impl LevelFaucetPlan {
         degree: usize,
         nonce_map: Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>,
         is_final_level: bool,
+        txn_builder: Arc<T>,
     ) -> Self {
         let execution_mode = PlanExecutionMode::Full;
         let id = match execution_mode {
@@ -72,12 +77,14 @@ impl LevelFaucetPlan {
             nonce_map,
             is_final_level,
             concurrency_limit: DEFAULT_CONCURRENCY_LIMIT,
+            txn_builder,
+            _phantom: PhantomData,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl TxnPlan for LevelFaucetPlan {
+impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
     fn id(&self) -> &PlanId {
         &self.id
     }
@@ -110,6 +117,8 @@ impl TxnPlan for LevelFaucetPlan {
         let chain_id = self.chain_id;
         let level = self.level;
         let is_final_level = self.is_final_level;
+        let txn_builder = self.txn_builder.clone();
+
         let handle = tokio::task::spawn_blocking(move || {
             senders
                 .into_par_iter()
@@ -134,19 +143,11 @@ impl TxnPlan for LevelFaucetPlan {
                             .get(&sender_signer.address())
                             .unwrap()
                             .fetch_add(1, Ordering::Relaxed);
-
-                        let tx_request = TransactionRequest::default()
-                            .with_to(*to_address)
-                            .with_value(value)
-                            .with_nonce(nonce)
-                            .with_chain_id(chain_id)
-                            .with_max_priority_fee_per_gas(10_000_000_000) // 0.1 gwei
-                            .with_max_fee_per_gas(10_000_000_000) // 0.1 gwei
-                            .with_gas_limit(100_000); // Standard gas for ERC20 transfer
+                        let tx_request =
+                            txn_builder.build_faucet_txn(*to_address, value, nonce, chain_id);
                         let tx_envelope =
                             TxnBuilder::build_and_sign_transaction(tx_request, &sender_signer)
                                 .unwrap();
-
                         let metadata = Arc::new(TxnMetadata {
                             from_account: Arc::new(sender_signer.address()),
                             nonce,

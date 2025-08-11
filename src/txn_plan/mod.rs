@@ -7,5 +7,7 @@ pub mod plan;
 pub mod plan_builder;
 pub mod traits;
 
+pub mod faucet_txn_builder;
+
 pub use plan_builder::PlanBuilder;
 pub use traits::*;
