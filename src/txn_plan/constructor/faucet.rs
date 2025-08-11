@@ -16,7 +16,7 @@ use std::{
 use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.
-const GAS_PRICE: u64 = 210_000_000_000; // 210 Gwei
+const GAS_PRICE: u64 = 2100000000000000; // 210 Gwei
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();
@@ -83,7 +83,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
             } else {
-                U256::ZERO
+                panic!("Total accounts is 0");
             };
 
             let num_intermediate_levels = total_levels - 1;

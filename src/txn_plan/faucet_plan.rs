@@ -6,11 +6,10 @@ use crate::{
     },
 };
 use alloy::{
-    eips::Encodable2718,
-    primitives::{Address, U256},
-    signers::local::PrivateKeySigner,
+    eips::Encodable2718, network::TransactionBuilder, primitives::{Address, U256}, signers::local::PrivateKeySigner
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use tracing::info;
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -143,13 +142,11 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                             .get(&sender_signer.address())
                             .unwrap()
                             .fetch_add(1, Ordering::Relaxed);
-
                         let tx_request =
                             txn_builder.build_faucet_txn(*to_address, value, nonce, chain_id);
                         let tx_envelope =
                             TxnBuilder::build_and_sign_transaction(tx_request, &sender_signer)
-                                .unwrap();
-
+                                .unwrap();                        
                         let metadata = Arc::new(TxnMetadata {
                             from_account: Arc::new(sender_signer.address()),
                             nonce,
