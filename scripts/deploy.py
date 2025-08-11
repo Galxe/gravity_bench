@@ -213,7 +213,7 @@ def main(args):
 
     # --- Deploy Custom Tokens ---
     print("\n--- Deploying Custom ERC20 Tokens ---")
-    initial_supply = w3.to_wei(10**12, 'ether')
+    initial_supply = w3.to_wei(10**20, 'ether')
     deployed_tokens = []
     for i in range(args.num_tokens):
         token_name = f"MyToken{i+1}"

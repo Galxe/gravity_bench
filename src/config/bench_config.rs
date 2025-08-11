@@ -27,6 +27,7 @@ pub struct NodeConfig {
 pub struct FaucetConfig {
     pub private_key: String,
     pub faucet_level: u64,
+    pub init_token_balance: String,
 }
 
 /// Load testing account configuration

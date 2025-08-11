@@ -20,6 +20,7 @@ pub struct Addresses {
     pub uniswap_v2_factory: String,
     #[serde(rename = "uniswap_v2_router")]
     pub uniswap_v2_router: String,
+    #[allow(unused)]
     pub weth9: String,
     pub tokens: Vec<Token>,
     #[serde(rename = "liquidity_eth_pairs")]
@@ -91,6 +92,7 @@ impl ContractConfig {
     }
 
     /// Get WETH address as Address type
+    #[allow(unused)]
     pub fn get_weth_address(&self) -> anyhow::Result<Address> {
         Address::from_str(&self.addresses.weth9)
             .map_err(|e| anyhow::anyhow!("Invalid WETH address: {}", e))

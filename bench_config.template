@@ -16,6 +16,7 @@ private_key = "xxxxx"
 # Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
 # Value 0: Disables cascading, processes data directly
 faucet_level = 10 
+init_token_balance = "10_000_000_000_000_000_000"
 
 # Load testing account configuration
 [accounts]

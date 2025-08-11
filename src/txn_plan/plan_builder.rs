@@ -54,6 +54,7 @@ impl PlanBuilder {
     }
 
     /// Create token distribution plan (swap tokens through Uniswap)
+    #[allow(unused)]
     pub fn swap_eth_to_token(
         router_address: Address,
         token_address: Address,

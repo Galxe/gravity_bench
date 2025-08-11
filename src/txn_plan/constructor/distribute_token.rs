@@ -21,6 +21,7 @@ pub struct SwapEthToTokenConstructor {
 }
 
 impl SwapEthToTokenConstructor {
+    #[allow(unused)]
     pub fn new(
         router_address: Address,
         token_address: Address,
