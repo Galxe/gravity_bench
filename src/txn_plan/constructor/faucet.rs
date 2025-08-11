@@ -16,8 +16,7 @@ use std::{
 use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.
-const GAS_LIMIT: u64 = 100_000;
-const GAS_PRICE: u64 = 1000_000_000_000; // 1000 Gwei
+const GAS_PRICE: u64 = 210_000_000_000; // 210 Gwei
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();
@@ -56,7 +55,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let total_levels = Self::calculate_levels(total_accounts, degree);
 
         let degree_u256 = U256::from(degree);
-        let gas_cost_per_txn = U256::from(GAS_LIMIT) * U256::from(GAS_PRICE);
+        let gas_cost_per_txn = U256::from(GAS_PRICE);
 
         let (amount_per_recipient, intermediate_funding_amounts) = if total_levels > 1 {
             // This is a multi-level distribution.
@@ -72,11 +71,14 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             let total_remained_eth = U256::from(intermediate_txns) * remained_eth;
             let total_cost = total_gas_cost + total_remained_eth;
-            let amount_for_leaves = if faucet_balance > total_cost {
-                faucet_balance - total_cost
-            } else {
-                U256::ZERO
-            };
+            let amount_for_leaves =
+                if txn_builder.subtracts_gas_from_balance() && faucet_balance > total_cost {
+                    faucet_balance - total_cost
+                } else if !txn_builder.subtracts_gas_from_balance() {
+                    faucet_balance
+                } else {
+                    panic!("Faucet balance is not enough to cover the gas cost");
+                };
 
             let amount_per_recipient = if total_accounts > 0 {
                 amount_for_leaves / U256::from(total_accounts)
@@ -101,8 +103,12 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         } else {
             // No intermediate levels needed, direct distribution from faucet.
             let total_gas_cost = U256::from(total_accounts) * gas_cost_per_txn;
-            let amount_for_leaves = if faucet_balance > total_gas_cost {
+            let amount_for_leaves = if txn_builder.subtracts_gas_from_balance()
+                && faucet_balance > total_gas_cost
+            {
                 faucet_balance - total_gas_cost
+            } else if !txn_builder.subtracts_gas_from_balance() {
+                faucet_balance
             } else {
                 U256::ZERO
             };
