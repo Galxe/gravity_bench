@@ -4,12 +4,14 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::Result;
+use clap::Parser;
 use std::{
+    collections::HashMap,
     process::{Command, Output},
     str::FromStr,
     sync::Arc,
 };
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
@@ -24,6 +26,13 @@ use crate::{
     util::gen_account::gen_account,
 };
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(long, default_value_t = false)]
+    recover: bool,
+}
+
 // mod uniswap;
 mod util;
 // Module declarations
@@ -33,6 +42,27 @@ mod config;
 // mod engine;
 mod eth;
 mod txn_plan;
+
+async fn load_accounts_from_file(
+    path: &str,
+) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
+    let file = tokio::fs::File::open(path).await?;
+    let reader = TokioBufReader::new(file);
+    let mut lines = reader.lines();
+    let mut accounts = HashMap::new();
+
+    while let Some(line) = lines.next_line().await? {
+        let parts: Vec<&str> = line.split(", ").collect();
+        if parts.len() == 2 {
+            let signer = PrivateKeySigner::from_str(parts[1])?;
+            let address = signer.address();
+            accounts.insert(Arc::new(address), Arc::new(signer));
+        } else {
+            return Err(anyhow::anyhow!("Invalid line in accounts file: {}", line));
+        }
+    }
+    Ok(accounts)
+}
 
 async fn run_plan(
     plan: Box<dyn TxnPlan>,
@@ -144,51 +174,15 @@ fn run_command(command: &str) -> Result<Output> {
         panic!("command failed: {:?}", output);
     }
 }
-#[actix::main]
-async fn main() -> Result<()> {
-    let benchmark_config = BenchConfig::load("bench_config.toml").unwrap();
-    assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .init();
-    let mut command = format!(
-        "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
-        benchmark_config.faucet.private_key,
-        benchmark_config.num_tokens,
-        benchmark_config.contract_config_path,
-        benchmark_config.nodes[0].rpc_url
-    );
-    if benchmark_config.enable_swap_token {
-        command.push_str(" --enable-swap-token");
-    }
-    let res = run_command(&command).unwrap();
-    info!("{}", String::from_utf8_lossy(&res.stdout));
-    let contract_config =
-        ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-    let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
-    let accounts_clone = accounts.clone();
-    tokio::spawn(async move {
-        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-        for account in accounts_clone.iter() {
-            file.write(
-                format!(
-                    "{}, {}\n",
-                    account.0.to_string(),
-                    hex::encode(account.1.credential().to_bytes().as_slice())
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        }
-    });
+async fn run_benchmark_session(
+    benchmark_config: &BenchConfig,
+    contract_config: ContractConfig,
+    accounts: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
+) -> Result<()> {
     let account_addresses = Arc::new(
         accounts
-            .iter()
-            .map(|account| account.0.clone())
+            .keys()
+            .map(|account| account.clone())
             .collect::<Vec<_>>(),
     );
     // Create EthHttpCli instance
@@ -200,16 +194,7 @@ async fn main() -> Result<()> {
             Arc::new(client)
         })
         .collect();
-    let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-    let faucet_start_nonce = eth_clients[0]
-        .get_transaction_count(faucet_address.address())
-        .await
-        .unwrap();
-    let faucet_balance = eth_clients[0]
-        .get_balance(&faucet_address.address())
-        .await
-        .unwrap();
-    // 1e20 is the gas fee
+
     let monitor = Monitor::new_with_clients(
         eth_clients.clone(),
         benchmark_config.performance.max_pool_size,
@@ -228,69 +213,187 @@ async fn main() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let producer = Producer::new(accounts, consumer, monitor).unwrap().start();
+    let producer = Producer::new(accounts.clone(), consumer, monitor).unwrap().start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    info!("Initializing Faucet constructor...");
-    let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-        benchmark_config.faucet.faucet_level as usize,
-        faucet_balance,
-        &benchmark_config.faucet.private_key,
-        faucet_start_nonce,
-        account_addresses.clone(),
-        Arc::new(EthFaucetTxnBuilder),
-        U256::from(benchmark_config.num_tokens)
-            * U256::from(21000)
-            * U256::from(1000_000_000_000u64),
-    )
-    .unwrap();
-    execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
-
-    let all_token_addresses = contract_config.get_all_token_addresses();
-    let faucet_signer_for_token =
-        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-
-    for token in &all_token_addresses {
-        info!("distributing token: {}", token);
-
-        let faucet_current_nonce = eth_clients[0]
-            .get_transaction_count(faucet_signer_for_token.address())
-            .await
-            .unwrap();
-        let balance = IERC20::new(*token, eth_clients[0].provider())
-            .balanceOf(faucet_signer_for_token.address())
-            .call()
-            .await
-            .unwrap();
-
-        info!("balance of token: {}", balance);
-
-        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-            benchmark_config.faucet.faucet_level as usize,
-            balance,
-            &benchmark_config.faucet.private_key,
-            faucet_current_nonce,
-            account_addresses.clone(),
-            Arc::new(Erc20FaucetTxnBuilder::new(*token)),
-            U256::ZERO,
-        )
-        .unwrap();
-
-        execute_faucet_distribution(
-            token_faucet_builder,
-            chain_id,
-            &producer,
-            &format!("Token {}", token),
-        )
-        .await?;
-    }
     let tps = benchmark_config.target_tps as usize;
     if benchmark_config.enable_swap_token {
         info!("bench uniswap");
-        test_uniswap(account_addresses, chain_id, contract_config, &producer, tps).await?;
+        test_uniswap(
+            account_addresses,
+            chain_id,
+            contract_config,
+            &producer,
+            tps,
+        )
+        .await?;
     } else {
         info!("bench erc20 transfer");
-        test_erc20_transfer(account_addresses, chain_id, contract_config, &producer, tps).await?;
+        test_erc20_transfer(
+            account_addresses,
+            chain_id,
+            contract_config,
+            &producer,
+            tps,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+#[actix::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    let benchmark_config = BenchConfig::load("bench_config.toml").unwrap();
+    assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .init();
+
+    if args.recover {
+        info!("Starting in recovery mode...");
+        let contract_config =
+            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
+        let accounts = load_accounts_from_file("accounts.txt").await?;
+        info!("Loaded {} accounts from accounts.txt", accounts.len());
+        run_benchmark_session(&benchmark_config, contract_config, accounts).await?;
+    } else {
+        info!("Starting in normal mode...");
+        let mut command = format!(
+            "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
+            benchmark_config.faucet.private_key,
+            benchmark_config.num_tokens,
+            benchmark_config.contract_config_path,
+            benchmark_config.nodes[0].rpc_url
+        );
+        if benchmark_config.enable_swap_token {
+            command.push_str(" --enable-swap-token");
+        }
+        let res = run_command(&command).unwrap();
+        info!("{}", String::from_utf8_lossy(&res.stdout));
+        let contract_config =
+            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
+        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
+        let accounts_clone = accounts.clone();
+        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
+        for account in accounts_clone.iter() {
+            file.write(
+                format!(
+                    "{}, {}\n",
+                    account.0.to_string(),
+                    hex::encode(account.1.to_bytes())
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        }
+        let account_addresses = Arc::new(
+            accounts
+                .iter()
+                .map(|account| account.0.clone())
+                .collect::<Vec<_>>(),
+        );
+        // Create EthHttpCli instance
+        let eth_clients: Vec<Arc<EthHttpCli>> = benchmark_config
+            .nodes
+            .iter()
+            .map(|node| {
+                let client = EthHttpCli::new(&node.rpc_url, node.chain_id).unwrap();
+                Arc::new(client)
+            })
+            .collect();
+        let faucet_address =
+            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+        let faucet_start_nonce = eth_clients[0]
+            .get_transaction_count(faucet_address.address())
+            .await
+            .unwrap();
+        let faucet_balance = eth_clients[0]
+            .get_balance(&faucet_address.address())
+            .await
+            .unwrap();
+        // 1e20 is the gas fee
+        let monitor = Monitor::new_with_clients(
+            eth_clients.clone(),
+            benchmark_config.performance.max_pool_size,
+        )
+        .start();
+        let eth_providers: Vec<EthHttpCli> = eth_clients
+            .iter()
+            .map(|client| EthHttpCli::new(client.rpc().as_ref(), client.chain_id()).unwrap())
+            .collect();
+
+        let consumer = Consumer::new_with_providers(
+            eth_providers,
+            benchmark_config.performance.num_senders,
+            monitor.clone(),
+            benchmark_config.performance.max_pool_size,
+            Some(benchmark_config.target_tps as u32),
+        )
+        .start();
+        let producer = Producer::new(accounts.clone(), consumer, monitor)
+            .unwrap()
+            .start();
+        let chain_id = benchmark_config.nodes[0].chain_id;
+
+        info!("Initializing Faucet constructor...");
+        let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+            benchmark_config.faucet.faucet_level as usize,
+            faucet_balance,
+            &benchmark_config.faucet.private_key,
+            faucet_start_nonce,
+            account_addresses.clone(),
+            Arc::new(EthFaucetTxnBuilder),
+            U256::from(benchmark_config.num_tokens)
+                * U256::from(21000)
+                * U256::from(1000_000_000_000u64),
+        )
+        .unwrap();
+        execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
+
+        let all_token_addresses = contract_config.get_all_token_addresses();
+        let faucet_signer_for_token =
+            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+
+        for token in &all_token_addresses {
+            info!("distributing token: {}", token);
+
+            let faucet_current_nonce = eth_clients[0]
+                .get_transaction_count(faucet_signer_for_token.address())
+                .await
+                .unwrap();
+            let balance = IERC20::new(*token, eth_clients[0].provider())
+                .balanceOf(faucet_signer_for_token.address())
+                .call()
+                .await
+                .unwrap();
+
+            info!("balance of token: {}", balance);
+
+            let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+                benchmark_config.faucet.faucet_level as usize,
+                balance,
+                &benchmark_config.faucet.private_key,
+                faucet_current_nonce,
+                account_addresses.clone(),
+                Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+                U256::ZERO,
+            )
+            .unwrap();
+
+            execute_faucet_distribution(
+                token_faucet_builder,
+                chain_id,
+                &producer,
+                &format!("Token {}", token),
+            )
+            .await?;
+        }
+        run_benchmark_session(&benchmark_config, contract_config, accounts.clone()).await?;
     }
     Ok(())
 }
