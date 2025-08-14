@@ -78,6 +78,6 @@ impl FaucetTxnBuilder for Erc20FaucetTxnBuilder {
             .with_chain_id(chain_id)
             .with_max_priority_fee_per_gas(10_000_000_000)
             .with_max_fee_per_gas(10_000_000_000)
-            .with_gas_limit(100_000) // A reasonable default for ERC20 transfers
+            .with_gas_limit(66_000) // A reasonable default for ERC20 transfers
     }
 }

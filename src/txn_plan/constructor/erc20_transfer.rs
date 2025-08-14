@@ -73,7 +73,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
             .with_chain_id(self.chain_id)
             .with_max_priority_fee_per_gas(10_000_000_000) // 0.1 gwei
             .with_max_fee_per_gas(10_000_000_000) // 0.1 gwei
-            .with_gas_limit(100_000); // Standard gas for ERC20 transfer
+            .with_gas_limit(50_000); // Standard gas for ERC20 transfer
 
         Ok(tx_request)
     }
