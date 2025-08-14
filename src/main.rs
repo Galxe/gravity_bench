@@ -174,11 +174,46 @@ fn run_command(command: &str) -> Result<Output> {
         panic!("command failed: {:?}", output);
     }
 }
-async fn run_benchmark_session(
-    benchmark_config: &BenchConfig,
-    contract_config: ContractConfig,
-    accounts: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-) -> Result<()> {
+
+#[actix::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    let benchmark_config = BenchConfig::load("bench_config.toml").unwrap();
+    assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .init();
+
+    let (contract_config, accounts) = if args.recover {
+        info!("Starting in recovery mode...");
+        let contract_config =
+            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
+        let accounts = load_accounts_from_file("accounts.txt").await?;
+        info!("Loaded {} accounts from accounts.txt", accounts.len());
+        (contract_config, accounts)
+    } else {
+        info!("Starting in normal mode...");
+        let mut command = format!(
+            "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
+            benchmark_config.faucet.private_key,
+            benchmark_config.num_tokens,
+            benchmark_config.contract_config_path,
+            benchmark_config.nodes[0].rpc_url
+        );
+        if benchmark_config.enable_swap_token {
+            command.push_str(" --enable-swap-token");
+        }
+        let res = run_command(&command).unwrap();
+        info!("{}", String::from_utf8_lossy(&res.stdout));
+        let contract_config =
+            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
+        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
+        (contract_config, accounts)
+    };
+
     let account_addresses = Arc::new(
         accounts
             .keys()
@@ -213,99 +248,13 @@ async fn run_benchmark_session(
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let producer = Producer::new(accounts.clone(), consumer, monitor).unwrap().start();
+    let nonce_map = init_nonce(accounts.clone(), eth_clients[0].clone()).await;
+    let producer = Producer::new(accounts.clone(), nonce_map, consumer, monitor)
+        .unwrap()
+        .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    let tps = benchmark_config.target_tps as usize;
-    if benchmark_config.enable_swap_token {
-        info!("bench uniswap");
-        test_uniswap(
-            account_addresses,
-            chain_id,
-            contract_config,
-            &producer,
-            tps,
-        )
-        .await?;
-    } else {
-        info!("bench erc20 transfer");
-        test_erc20_transfer(
-            account_addresses,
-            chain_id,
-            contract_config,
-            &producer,
-            tps,
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-#[actix::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-    let benchmark_config = BenchConfig::load("bench_config.toml").unwrap();
-    assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
-        .init();
-
-    if args.recover {
-        info!("Starting in recovery mode...");
-        let contract_config =
-            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        let accounts = load_accounts_from_file("accounts.txt").await?;
-        info!("Loaded {} accounts from accounts.txt", accounts.len());
-        run_benchmark_session(&benchmark_config, contract_config, accounts).await?;
-    } else {
-        info!("Starting in normal mode...");
-        let mut command = format!(
-            "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
-            benchmark_config.faucet.private_key,
-            benchmark_config.num_tokens,
-            benchmark_config.contract_config_path,
-            benchmark_config.nodes[0].rpc_url
-        );
-        if benchmark_config.enable_swap_token {
-            command.push_str(" --enable-swap-token");
-        }
-        let res = run_command(&command).unwrap();
-        info!("{}", String::from_utf8_lossy(&res.stdout));
-        let contract_config =
-            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
-        let accounts_clone = accounts.clone();
-        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-        for account in accounts_clone.iter() {
-            file.write(
-                format!(
-                    "{}, {}\n",
-                    account.0.to_string(),
-                    hex::encode(account.1.to_bytes())
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        }
-        let account_addresses = Arc::new(
-            accounts
-                .iter()
-                .map(|account| account.0.clone())
-                .collect::<Vec<_>>(),
-        );
-        // Create EthHttpCli instance
-        let eth_clients: Vec<Arc<EthHttpCli>> = benchmark_config
-            .nodes
-            .iter()
-            .map(|node| {
-                let client = EthHttpCli::new(&node.rpc_url, node.chain_id).unwrap();
-                Arc::new(client)
-            })
-            .collect();
+    if !args.recover {
         let faucet_address =
             PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
         let faucet_start_nonce = eth_clients[0]
@@ -316,29 +265,6 @@ async fn main() -> Result<()> {
             .get_balance(&faucet_address.address())
             .await
             .unwrap();
-        // 1e20 is the gas fee
-        let monitor = Monitor::new_with_clients(
-            eth_clients.clone(),
-            benchmark_config.performance.max_pool_size,
-        )
-        .start();
-        let eth_providers: Vec<EthHttpCli> = eth_clients
-            .iter()
-            .map(|client| EthHttpCli::new(client.rpc().as_ref(), client.chain_id()).unwrap())
-            .collect();
-
-        let consumer = Consumer::new_with_providers(
-            eth_providers,
-            benchmark_config.performance.num_senders,
-            monitor.clone(),
-            benchmark_config.performance.max_pool_size,
-            Some(benchmark_config.target_tps as u32),
-        )
-        .start();
-        let producer = Producer::new(accounts.clone(), consumer, monitor)
-            .unwrap()
-            .start();
-        let chain_id = benchmark_config.nodes[0].chain_id;
 
         info!("Initializing Faucet constructor...");
         let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
@@ -393,7 +319,44 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        run_benchmark_session(&benchmark_config, contract_config, accounts.clone()).await?;
+
+        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
+        for account in accounts.iter() {
+            file.write(
+                format!(
+                    "{}, {}\n",
+                    account.0.to_string(),
+                    hex::encode(account.1.to_bytes())
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        }
+    }
+
+    let tps = benchmark_config.target_tps as usize;
+    if benchmark_config.enable_swap_token {
+        info!("bench uniswap");
+        test_uniswap(account_addresses, chain_id, contract_config, &producer, tps).await?;
+    } else {
+        info!("bench erc20 transfer");
+        test_erc20_transfer(account_addresses, chain_id, contract_config, &producer, tps).await?;
     }
     Ok(())
+}
+
+async fn init_nonce(
+    accounts: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
+    eth_client: Arc<EthHttpCli>,
+) -> HashMap<Arc<Address>, u32> {
+    let mut nonce_map = HashMap::new();
+    for account in accounts.iter() {
+        let nonce = eth_client
+            .get_transaction_count(*account.0.clone())
+            .await
+            .unwrap();
+        nonce_map.insert(account.0.clone(), nonce as u32);
+    }
+    nonce_map
 }

@@ -59,6 +59,7 @@ pub struct Producer {
 impl Producer {
     pub fn new(
         account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
+        account_nonce: HashMap<Arc<Address>, u32>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
     ) -> Result<Self, anyhow::Error> {
@@ -73,7 +74,10 @@ impl Producer {
                 success_txns: 0,
                 failed_txns: 0,
             },
-            account_manager: Arc::new(Mutex::new(AccountManager::new(account_signers))),
+            account_manager: Arc::new(Mutex::new(AccountManager::new(
+                account_signers,
+                account_nonce,
+            ))),
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
