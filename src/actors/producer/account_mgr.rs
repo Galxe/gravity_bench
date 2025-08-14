@@ -10,13 +10,17 @@ pub struct AccountManager {
 }
 
 impl AccountManager {
-    pub fn new(account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>) -> Self {
+    pub fn new(
+        account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
+        account_nonce: HashMap<Arc<Address>, u32>,
+    ) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
         let all_account_addresses = account_signers.keys().cloned().collect();
         for (addr, signer) in account_signers.iter() {
-            account_status.insert(addr.clone(), 0);
-            ready_accounts.push((signer.clone(), addr.clone(), 0));
+            let nonce = account_nonce.get(addr).unwrap_or(&0);
+            account_status.insert(addr.clone(), *nonce);
+            ready_accounts.push((signer.clone(), addr.clone(), *nonce));
         }
         Self {
             account_signers,
