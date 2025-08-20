@@ -35,7 +35,7 @@ pub struct ProducerState {
 }
 
 impl ProducerState {
-    pub fn new() -> Self {
+    pub fn running() -> Self {
         Self {
             state: Arc::new(AtomicU32::new(1)),
         }
@@ -87,7 +87,7 @@ impl Producer {
         monitor_addr: Addr<Monitor>,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
-            state: ProducerState::new(),
+            state: ProducerState::running(),
             stats: ProducerStats {
                 remain_plans_num: 0,
                 sending_txns: Arc::new(AtomicU64::new(0)),
