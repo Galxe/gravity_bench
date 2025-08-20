@@ -248,7 +248,7 @@ async fn main() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let nonce_map = init_nonce(accounts.clone(), eth_clients[0].clone()).await;
+    let nonce_map = init_nonce(&accounts, eth_clients[0].clone(), args.recover).await;
     let producer = Producer::new(accounts.clone(), nonce_map, consumer, monitor)
         .unwrap()
         .start();
@@ -347,16 +347,23 @@ async fn main() -> Result<()> {
 }
 
 async fn init_nonce(
-    accounts: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
+    accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
     eth_client: Arc<EthHttpCli>,
+    recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
-    let mut nonce_map = HashMap::new();
-    for account in accounts.iter() {
-        let nonce = eth_client
-            .get_transaction_count(*account.0.clone())
-            .await
-            .unwrap();
-        nonce_map.insert(account.0.clone(), nonce as u32);
+    let mut nonce_map = HashMap::with_capacity(accounts.len());
+    if recover {
+        for account in accounts.iter() {
+            let nonce = eth_client
+                .get_transaction_count(*account.0.clone())
+                .await
+                .unwrap();
+            nonce_map.insert(account.0.clone(), nonce as u32);
+        }
+    } else {
+        for account in accounts.iter() {
+            nonce_map.insert(account.0.clone(), 0);
+        }
     }
     nonce_map
 }
