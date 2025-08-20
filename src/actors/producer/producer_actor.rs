@@ -2,7 +2,7 @@ use actix::prelude::*;
 use alloy::primitives::Address;
 use alloy::signers::local::PrivateKeySigner;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -19,12 +19,6 @@ use crate::txn_plan::{PlanExecutionMode, PlanId, TxnPlan};
 
 use super::messages::RegisterTxnPlan;
 
-#[derive(PartialEq, Eq, Debug)]
-pub enum State {
-    Running,
-    Paused,
-}
-
 pub struct ProducerStats {
     pub remain_plans_num: u64,
     pub success_plans_num: u64,
@@ -35,12 +29,41 @@ pub struct ProducerStats {
     pub ready_accounts: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProducerState {
+    state: Arc<AtomicU32>,
+}
+
+impl ProducerState {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(AtomicU32::new(1)),
+        }
+    }
+
+    pub fn set_running(&self) {
+        self.state.store(1, Ordering::Relaxed);
+    }
+
+    pub fn set_paused(&self) {
+        self.state.store(0, Ordering::Relaxed);
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == 1
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == 0
+    }
+}
+
 /// The main TxnProducer actor, responsible for executing transaction plans sequentially.
 pub struct Producer {
     /// Manages account nonces and readiness.
     account_manager: Arc<Mutex<AccountManager>>,
     /// The current state of the producer (Running or Paused).
-    state: State,
+    state: ProducerState,
 
     stats: ProducerStats,
 
@@ -64,7 +87,7 @@ impl Producer {
         monitor_addr: Addr<Monitor>,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
-            state: State::Running,
+            state: ProducerState::new(),
             stats: ProducerStats {
                 remain_plans_num: 0,
                 sending_txns: Arc::new(AtomicU64::new(0)),
@@ -96,7 +119,7 @@ impl Producer {
     /// This method should be called whenever there's a state change that might
     /// allow a waiting plan to proceed (e.g., a plan completes, an account becomes ready).
     fn trigger_next_plan_if_needed(&self, ctx: &mut Context<Self>) {
-        if self.state == State::Running && !self.plan_queue.is_empty() {
+        if self.state.is_running() && !self.plan_queue.is_empty() {
             ctx.address().do_send(ExeFrontPlan);
         }
     }
@@ -121,6 +144,7 @@ impl Producer {
         account_manager: Arc<Mutex<AccountManager>>,
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
+        state: ProducerState,
     ) -> Result<(), anyhow::Error> {
         tracing::info!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
@@ -148,6 +172,10 @@ impl Producer {
         let mut count = 0;
         // Send all signed transactions to the consumer
         while let Ok(signed_txn) = iterator.iterator.recv() {
+            while state.is_paused() {
+                tracing::info!("Producer is paused");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
             if let Err(e) = consumer_addr.send(signed_txn).await {
                 // If sending to the consumer fails, we abort the entire plan.
                 tracing::error!(
@@ -209,7 +237,7 @@ impl Handler<ExeFrontPlan> for Producer {
 
     fn handle(&mut self, _msg: ExeFrontPlan, ctx: &mut Self::Context) -> Self::Result {
         // If paused or queue is empty, do nothing. This is a safeguard.
-        if self.state == State::Paused || self.plan_queue.is_empty() {
+        if self.state.is_paused() || self.plan_queue.is_empty() {
             return Box::pin(async {}.into_actor(self));
         }
 
@@ -221,6 +249,7 @@ impl Handler<ExeFrontPlan> for Producer {
         let consumer_addr = self.consumer_addr.clone();
         let self_addr = ctx.address();
         let sending_txns = self.stats.sending_txns.clone();
+        let state = self.state.clone();
         Box::pin(
             async move {
                 // Check if the plan is ready to be executed.
@@ -241,6 +270,7 @@ impl Handler<ExeFrontPlan> for Producer {
                     account_manager,
                     plan,
                     sending_txns,
+                    state,
                 )
                 .await
                 {
@@ -392,7 +422,7 @@ impl Handler<PauseProducer> for Producer {
 
     fn handle(&mut self, _msg: PauseProducer, _ctx: &mut Self::Context) {
         tracing::info!("Producer paused. No new plans will be executed.");
-        self.state = State::Paused;
+        self.state.set_paused();
     }
 }
 
@@ -402,7 +432,7 @@ impl Handler<ResumeProducer> for Producer {
 
     fn handle(&mut self, _msg: ResumeProducer, ctx: &mut Self::Context) {
         tracing::info!("Producer resumed.");
-        self.state = State::Running;
+        self.state.set_running();
 
         // The producer is running again, so we attempt to trigger a plan if one is waiting.
         self.trigger_next_plan_if_needed(ctx);
