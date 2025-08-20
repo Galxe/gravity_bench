@@ -123,6 +123,10 @@ impl TxnTracker {
     /// Handle transaction submission result
     pub fn handle_submission_result(&mut self, msg: &UpdateSubmissionResult) {
         let plan_id = &msg.metadata.plan_id;
+        if !self.plan_trackers.contains_key(plan_id) {
+            warn!("Plan not found: plan_id={}", plan_id);
+            return;
+        }
         let plan_tracker = self.plan_trackers.get_mut(plan_id).unwrap();
 
         plan_tracker.consumed_transactions += 1;
