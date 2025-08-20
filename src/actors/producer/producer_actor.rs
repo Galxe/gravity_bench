@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::actors::consumer::Consumer;
-use crate::actors::monitor::monitor_actor::ProduceTxns;
+use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
 use crate::actors::monitor::{
     Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, SubmissionResult,
     UpdateSubmissionResult,
@@ -195,6 +195,9 @@ impl Producer {
             count += 1;
             sending_txns.fetch_add(1, Ordering::Relaxed);
         }
+        monitor_addr.do_send(PlanProduced {
+            plan_id: plan_id.clone(),
+        });
 
         tracing::info!(
             "All transactions for plan '{}' (id={}) ({} txns) have been sent to the consumer.",
