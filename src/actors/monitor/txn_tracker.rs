@@ -39,6 +39,8 @@ struct PlanTracker {
     failed_submissions: u64,
     /// Number of failed executions (reverted)
     failed_executions: u64,
+
+    plan_produced: bool,
 }
 
 /// Detailed information of in-flight transactions
@@ -107,6 +109,12 @@ impl TxnTracker {
         }
     }
 
+    pub fn handle_plan_produced(&mut self, plan_id: PlanId) {
+        if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
+            tracker.plan_produced = true;
+        }
+    }
+
     /// Register new plan (no changes)
     pub fn register_plan(&mut self, plan_id: PlanId) {
         info!("Plan registered: plan_id={}", plan_id);
@@ -116,6 +124,7 @@ impl TxnTracker {
             consumed_transactions: 0,
             failed_submissions: 0,
             failed_executions: 0,
+            plan_produced: false,
         };
         self.plan_trackers.insert(plan_id, tracker);
     }
@@ -180,6 +189,7 @@ impl TxnTracker {
                 plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
             if tracker.produce_transactions != 0
                 && tracker.resolved_transactions as usize >= tracker.produce_transactions
+                && tracker.plan_produced
             {
                 let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
                 let status = if has_failures {

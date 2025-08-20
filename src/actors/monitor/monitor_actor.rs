@@ -177,11 +177,25 @@ pub struct ProduceTxns {
     pub plan_id: PlanId,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PlanProduced {
+    pub plan_id: PlanId,
+}
+
 impl Handler<ProduceTxns> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: ProduceTxns, _ctx: &mut Self::Context) {
         self.txn_tracker
             .handler_produce_txns(msg.plan_id, msg.count);
+    }
+}
+
+impl Handler<PlanProduced> for Monitor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PlanProduced, _ctx: &mut Self::Context) {
+        self.txn_tracker.handle_plan_produced(msg.plan_id);
     }
 }
