@@ -61,6 +61,8 @@ This design allows for creating flexible and complex benchmarking scenarios.
     python scripts/refresh_init_code.py
     ```
     and replace the init code in contracts/v2-periphery/contracts/libraries/UniswapV2Library.sol
+    
+    **Note:** This step can be skipped if you're not benchmarking Uniswap (i.e., if `enable_swap_token = false` in your configuration).
 
 3.  **Create the configuration file:**
     Copy the template to create your own configuration file.
