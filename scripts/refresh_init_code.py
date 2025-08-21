@@ -3,16 +3,15 @@ import os
 import re
 import shutil
 from web3 import Web3
-from solcx import compile_files, install_solc, set_solc_version, get_solcx_install_folder, set_solcx_install_folder
+from solcx import compile_files, install_solc, set_solc_version, get_solcx_install_folder
 
 # --- Configuration ---
 SOLC_VERSION = "0.5.16"
 UNISWAP_V2_PAIR_PATH = 'contracts/v2-core/contracts/UniswapV2Pair.sol'
 UNISWAP_V2_LIBRARY_PATH = 'contracts/v2-periphery/contracts/libraries/UniswapV2Library.sol'
 
-# Set solc installation directory to user's home directory
-SOLC_INSTALL_DIR = os.path.expanduser("~/.solcx")
-set_solcx_install_folder(SOLC_INSTALL_DIR)
+# Get the default solc installation directory (defaults to ~/.solcx)
+SOLC_INSTALL_DIR = get_solcx_install_folder()
 
 def install_solc_version(version):
     """Install and set the specified version of the Solidity compiler."""
