@@ -97,7 +97,6 @@ else
     deactivate
     exit 1
 fi
-deactivate
 echo "-----------------------------------------------------"
 
 log "success" "🎉 Setup completed successfully! Your environment is ready."
