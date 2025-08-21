@@ -101,6 +101,20 @@ echo "-----------------------------------------------------"
 
 log "success" "🎉 Setup completed successfully! Your environment is ready."
 echo ""
-log "info" "Python virtual environment is now ACTIVE and ready to use!"
-log "info" "You can now run Python scripts directly."
-log "info" "To deactivate the virtual environment later, run: deactivate"
+
+# Check if script was sourced or executed
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Script was executed (bash setup.sh), not sourced
+    log "warn" "Script was executed, not sourced. Virtual environment is NOT active in your current shell."
+    log "info" "To activate the Python virtual environment, run:"
+    log "info" "  source venv/bin/activate"
+    log "info" ""
+    log "info" "Alternatively, next time run the setup script with:"
+    log "info" "  source setup.sh"
+    log "info" "This will keep the virtual environment active in your current shell."
+else
+    # Script was sourced (source setup.sh)
+    log "success" "Python virtual environment is now ACTIVE and ready to use!"
+    log "info" "You can now run Python scripts directly."
+    log "info" "To deactivate the virtual environment later, run: deactivate"
+fi
