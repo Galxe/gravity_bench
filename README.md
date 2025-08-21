@@ -119,7 +119,7 @@ When using `cargo run`, arguments for `gravity_bench` itself must be passed afte
 
 You can combine arguments:
 ```bash
-cargo run --release -- --config custom_config.toml --recover
+cargo run --release -- --config bench_config.toml --recover
 ```
 
 ### Normal Workflow
