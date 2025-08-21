@@ -2,7 +2,24 @@
 import os
 import re
 import shutil
+import tempfile
 from web3 import Web3
+
+# Set up custom temp directory before importing solcx
+HOME_DIR = os.path.expanduser("~")
+CUSTOM_TEMP_DIR = os.path.join(HOME_DIR, ".tmp_solcx")
+os.makedirs(CUSTOM_TEMP_DIR, exist_ok=True)
+
+# Set all temp-related environment variables
+os.environ['TMPDIR'] = CUSTOM_TEMP_DIR
+os.environ['TMP'] = CUSTOM_TEMP_DIR  
+os.environ['TEMP'] = CUSTOM_TEMP_DIR
+os.environ['TEMPDIR'] = CUSTOM_TEMP_DIR
+
+# Set Python's tempfile module to use our custom directory
+tempfile.tempdir = CUSTOM_TEMP_DIR
+
+# Now import solcx after setting up the temp directory
 from solcx import compile_files, install_solc, set_solc_version, get_solcx_install_folder
 
 # --- Configuration ---
@@ -17,6 +34,7 @@ def install_solc_version(version):
     """Install and set the specified version of the Solidity compiler."""
     try:
         print(f"📦 Installing solc v{version} to {SOLC_INSTALL_DIR}...")
+        print(f"   Using temp directory: {CUSTOM_TEMP_DIR}")
         os.makedirs(SOLC_INSTALL_DIR, exist_ok=True)
         install_solc(version)
         set_solc_version(version)
