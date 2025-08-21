@@ -203,14 +203,21 @@ def main(args):
     # --- Compile ---
     contracts = compile_all_contracts()
 
-    # --- Deploy Core Contracts (Factory, WETH, Router) ---
-    print("\n--- Deploying Uniswap V2 & WETH Core Contracts ---")
-    factory_address, factory_contract = deploy_contract(w3, account, args.private_key, contracts['factory'], "UniswapV2Factory", account.address)
-    weth_address, _ = deploy_contract(w3, account, args.private_key, contracts['weth'], "WETH9")
-    router_address, router_contract = deploy_contract(w3, account, args.private_key, contracts['router'], "UniswapV2Router02", factory_address, weth_address)
-    
-    if not all([factory_address, weth_address, router_address]):
-        raise Exception("Core contract deployment failed. Exiting.")
+    # --- Initialize variables for contracts and results ---
+    factory_address, weth_address, router_address = None, None, None
+    factory_contract, router_contract = None, None
+    liquidity_eth_pairs = []
+    liquidity_token_pairs = []
+
+    if args.enable_swap_token:
+        # --- Deploy Core Contracts (Factory, WETH, Router) ---
+        print("\n--- Deploying Uniswap V2 & WETH Core Contracts ---")
+        factory_address, factory_contract = deploy_contract(w3, account, args.private_key, contracts['factory'], "UniswapV2Factory", account.address)
+        weth_address, _ = deploy_contract(w3, account, args.private_key, contracts['weth'], "WETH9")
+        router_address, router_contract = deploy_contract(w3, account, args.private_key, contracts['router'], "UniswapV2Router02", factory_address, weth_address)
+        
+        if not all([factory_address, weth_address, router_address]):
+            raise Exception("Core contract deployment failed. Exiting.")
 
     # --- Deploy Custom Tokens ---
     print("\n--- Deploying Custom ERC20 Tokens ---")
@@ -226,27 +233,25 @@ def main(args):
     if len(deployed_tokens) != args.num_tokens:
         raise Exception("Token deployment was not fully successful. Exiting.")
 
-    # --- Add Liquidity ---
-    print("\n--- Starting to Add Liquidity ---")
-    liquidity_eth_pairs = []
-    liquidity_token_pairs = []
-
-    # 1. Create Token/ETH pools for all tokens
-    for token_info in deployed_tokens:
-        if approve_token(w3, account, args.private_key, token_info['contract'], router_address, token_info['symbol']):
-            if add_liquidity_eth(w3, account, args.private_key, router_contract, token_info):
-                 pair_addr = factory_contract.functions.getPair(token_info['address'], weth_address).call()
-                 liquidity_eth_pairs.append({
-                     "token_a_symbol": token_info['symbol'],
-                     "token_a_address": token_info['address'],
-                     "token_b_symbol": "ETH",
-                     "token_b_address": weth_address,
-                     "lp_pair_address": pair_addr
-                })
-    
-    # 2. If enabled, create Token/Token pools for token pairs
     if args.enable_swap_token:
-        print("\n--- 'enable_swap_token' is ON. Creating Token-Token liquidity pools. ---")
+        # --- Add Liquidity ---
+        print("\n--- Starting to Add Liquidity ---")
+        
+        # 1. Create Token/ETH pools for all tokens
+        for token_info in deployed_tokens:
+            if approve_token(w3, account, args.private_key, token_info['contract'], router_address, token_info['symbol']):
+                if add_liquidity_eth(w3, account, args.private_key, router_contract, token_info):
+                    pair_addr = factory_contract.functions.getPair(token_info['address'], weth_address).call()
+                    liquidity_eth_pairs.append({
+                        "token_a_symbol": token_info['symbol'],
+                        "token_a_address": token_info['address'],
+                        "token_b_symbol": "ETH",
+                        "token_b_address": weth_address,
+                        "lp_pair_address": pair_addr
+                   })
+        
+        # 2. Create Token/Token pools for token pairs
+        print("\n--- Creating Token-Token liquidity pools. ---")
         if args.num_tokens % 2 != 0:
             print("⚠️ WARNING: Odd number of tokens. The last token will not be paired.")
         
@@ -270,7 +275,7 @@ def main(args):
                         "lp_pair_address": pair_addr
                     })
     else:
-        print("\n--- 'enable_swap_token' is OFF. Skipping Token-Token liquidity pool creation. ---")
+        print("\n--- 'enable_swap_token' is OFF. Skipping Uniswap deployment and liquidity provision. ---")
 
 
     # --- Generate Output File ---
@@ -311,7 +316,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-tokens', type=int, required=True, help='The total number of ERC20 tokens to deploy.')
     parser.add_argument('--rpc-url', default='http://localhost:8545', help='RPC URL of the Ethereum node.')
     parser.add_argument('--output-file', default='deploy.json', help='File path to save the JSON output.')
-    parser.add_argument('--enable-swap-token', action='store_true', help='If set, token-to-token liquidity pools will be created.')
+    parser.add_argument('--enable-swap-token', action='store_true', help='If set, deploys Uniswap contracts and creates liquidity pools.')
 
     args = parser.parse_args()
     main(args)
