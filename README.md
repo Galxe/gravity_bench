@@ -57,6 +57,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
     source ~/.cargo/env  # If Rust was installed
     ```
 
+3.  **Refresh Uniswap init code (optional):**
     ```bash
     python scripts/refresh_init_code.py
     ```
@@ -64,7 +65,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
     
     **Note:** This step can be skipped if you're not benchmarking Uniswap (i.e., if `enable_swap_token = false` in your configuration).
 
-3.  **Create the configuration file:**
+4.  **Create the configuration file:**
     Copy the template to create your own configuration file.
     ```bash
     cp bench_config.template bench_config.toml
