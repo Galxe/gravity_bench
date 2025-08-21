@@ -22,10 +22,12 @@ This design allows for creating flexible and complex benchmarking scenarios.
 
 ## Prerequisites
 
+*   **An Ethereum node with RPC endpoint enabled**: The tool needs an RPC endpoint to connect to.
+
+**Optional (will be auto-installed by setup script if missing):**
 *   **Rust**: [Install Rust](https://www.rust-lang.org/tools/install)
 *   **Node.js and npm**: [Install Node.js](https://nodejs.org/en/download/)
-*   **Python 3 and pip**: The setup scripts require Python. It is highly recommended to use a virtual environment.
-*   **An Ethereum node with RPC endpoint enabled**: The tool needs an RPC endpoint to connect to.
+*   **Python 3 and pip**: Required for setup scripts and contract deployment tools.
 
 ## Setup
 
@@ -35,21 +37,25 @@ This design allows for creating flexible and complex benchmarking scenarios.
     cd gravity_bench
     ```
 
-2.  **Set up Python environment and Install Dependencies:**
-    It is recommended to use a Python virtual environment to avoid conflicts with system-wide packages.
+2.  **Run the setup script:**
+    The setup script will automatically handle all dependencies and environment setup, including:
+    - Checking and installing missing tools (Node.js, Python, Rust)
+    - Creating a Python virtual environment
+    - Installing Python and Node.js dependencies
+    - Cloning required contract repositories
+    
+    **Recommended way (keeps environments active):**
     ```bash
-    # Create a virtual environment named 'venv'
-    python3 -m venv venv
-
-    # Activate the virtual environment
-    # On Windows, use: venv\Scripts\activate
-    source venv/bin/activate
+    source setup.sh
     ```
-    With the virtual environment active, run the setup script. It will install both Python and Node.js dependencies.
+    
+    **Alternative way (requires manual environment activation):**
     ```bash
     bash setup.sh
+    # Then manually activate environments:
+    source venv/bin/activate
+    source ~/.cargo/env  # If Rust was installed
     ```
-    This will clone the required repositories into the `contracts` directory and install npm packages.
 
     ```bash
     python scripts/refresh_init_code.py
