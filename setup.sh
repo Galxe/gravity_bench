@@ -72,15 +72,37 @@ else
     exit 1
 fi
 
-# Install Python dependencies
-log "info" "Running 'pip3 install' from requirements.txt..."
-pip3 install -r requirements.txt
-if [ $? -eq 0 ]; then
-    log "success" "Python dependencies installed successfully."
+# Create Python virtual environment
+log "info" "Creating Python virtual environment..."
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+    if [ $? -eq 0 ]; then
+        log "success" "Python virtual environment created successfully."
+    else
+        log "error" "Failed to create Python virtual environment."
+        exit 1
+    fi
 else
-    log "error" "pip3 install failed. Please check the errors above."
+    log "info" "Python virtual environment already exists."
+fi
+
+# Activate virtual environment and install Python dependencies
+log "info" "Installing Python dependencies in virtual environment..."
+source venv/bin/activate
+pip install -r requirements.txt
+if [ $? -eq 0 ]; then
+    log "success" "Python dependencies installed successfully in virtual environment."
+else
+    log "error" "pip install failed. Please check the errors above."
+    deactivate
     exit 1
 fi
+deactivate
 echo "-----------------------------------------------------"
 
 log "success" "🎉 Setup completed successfully! Your environment is ready."
+echo ""
+log "info" "To activate the Python virtual environment in the future, run:"
+log "info" "  source venv/bin/activate"
+log "info" "To deactivate the virtual environment, run:"
+log "info" "  deactivate"
