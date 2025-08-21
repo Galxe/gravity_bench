@@ -24,6 +24,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
 
 *   **Rust**: [Install Rust](https://www.rust-lang.org/tools/install)
 *   **Node.js and npm**: [Install Node.js](https://nodejs.org/en/download/)
+*   **Python 3 and pip**: The setup scripts require Python. It is highly recommended to use a virtual environment.
 *   **An Ethereum node with RPC endpoint enabled**: The tool needs an RPC endpoint to connect to.
 
 ## Setup
@@ -34,8 +35,17 @@ This design allows for creating flexible and complex benchmarking scenarios.
     cd gravity_bench
     ```
 
-2.  **Install contract dependencies:**
-    The project relies on external smart contracts (from Uniswap and OpenZeppelin). A setup script is provided to download them.
+2.  **Set up Python environment and Install Dependencies:**
+    It is recommended to use a Python virtual environment to avoid conflicts with system-wide packages.
+    ```bash
+    # Create a virtual environment named 'venv'
+    python3 -m venv venv
+
+    # Activate the virtual environment
+    # On Windows, use: venv\Scripts\activate
+    source venv/bin/activate
+    ```
+    With the virtual environment active, run the setup script. It will install both Python and Node.js dependencies.
     ```bash
     bash setup.sh
     ```
@@ -45,6 +55,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
     python scripts/refresh_init_code.py
     ```
     and replace the init code in contracts/v2-periphery/contracts/libraries/UniswapV2Library.sol
+
 3.  **Create the configuration file:**
     Copy the template to create your own configuration file.
     ```bash
@@ -53,39 +64,39 @@ This design allows for creating flexible and complex benchmarking scenarios.
 
 ## Configuration
 
-Edit `bench_config.toml` to set up your benchmark run.
+Edit `bench_config.toml` to set up your benchmark run. This is the default configuration file, but you can specify a different one using the `--config` command-line argument when running the benchmark.
 
 ```toml
-# Number of accounts to generate for the test
-num_accounts = 100
-# Target transactions per second
-target_tps = 50
-# Path for the generated contract configuration
-contract_config_path = "contract.json"
-# Number of ERC20 tokens to deploy
-num_tokens = 5
-# Enable swapping tokens on a DEX (if false, it will only do ERC20 transfers)
+# Gravity Bench Configuration File
+
+# Uniswap configuration file path
+contract_config_path = "deploy.json"
+target_tps = 10000
+nodes = [
+    { rpc_url = "http://localhost:8545", chain_id = 7771625 },
+]
+num_tokens=2
 enable_swap_token = false
-
-# Faucet account used to distribute funds to test accounts
+# Faucet and deployer account configuration
 [faucet]
-private_key = "YOUR_FAUCET_PRIVATE_KEY"
+# Private key (example, please replace with real private key)
+private_key = "xxxxx"
+# Faucet Level: Controls the depth of cascading faucet levels
+# Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
+# Value 0: Disables cascading, processes data directly
+faucet_level = 10 
 
-# Configuration for the generated accounts
+# Load testing account configuration
 [accounts]
-num_accounts = 100
+# Number of load testing accounts to generate
+num_accounts = 10000
 
-# Performance-related settings
+# Performance and stress configuration
 [performance]
-# Number of concurrent transaction senders
-num_senders = 10
-# Maximum number of transactions to keep in the mempool tracker
-max_pool_size = 10000
-
-# List of Ethereum nodes to connect to
-[[nodes]]
-rpc_url = "http://localhost:8545"
-chain_id = 31337
+# Number of concurrent transaction sending tasks inside TxnConsumer
+num_senders = 1000
+# Maximum capacity of the transaction pool inside Consumer
+max_pool_size = 100000
 ```
 
 **Key configuration options:**
@@ -97,16 +108,127 @@ chain_id = 31337
 
 ## Running the Benchmark
 
-Once the configuration is set up, you can run the benchmark using Cargo.
+Once the configuration is set up, you can run the benchmark using `cargo run`.
 
+### Command-Line Arguments
+
+When using `cargo run`, arguments for `gravity_bench` itself must be passed after a `--` separator. Arguments before the separator are for Cargo (e.g., `--release` to build with optimizations).
+
+**Syntax:**
+`cargo run [<cargo_args>] -- [<application_args>]`
+
+**Available Arguments:**
+
+*   `--config <PATH>`: Specifies the path to the configuration file. Defaults to `bench_config.toml`.
+    ```bash
+    cargo run --release -- --config custom_config.toml
+    ```
+*   `--recover`: Enables recovery mode. This is useful for re-running a benchmark without repeating the initial setup. See the "Recovery Mode" section for details.
+    ```bash
+    cargo run --release -- --recover
+    ```
+
+You can combine arguments:
 ```bash
-cargo run --release
+cargo run --release -- --config bench_config.toml --recover
 ```
 
-The application will perform the following steps:
+### Normal Workflow
+
+By default (without the `--recover` flag), the application will perform the following setup steps:
 1.  Connect to the specified Ethereum node.
 2.  Deploy the necessary ERC20 tokens and (if `enable_swap_token` is true) a Uniswap V2 router and liquidity pools.
-3.  Save the addresses of the deployed contracts to `contract.json` (or the path specified in `contract_config_path`).
+3.  Save the addresses of the deployed contracts to the file specified in `contract_config_path` (e.g., `contract.json`).
 4.  Generate the specified number of test accounts.
-5.  Fund the test accounts with ETH and ERC20 tokens from the faucet account.
-6.  Start generating the transaction workload as defined in the configuration. 
+5.  Fund the test accounts with ETH and ERC20 tokens from the faucet account. This step can take some time.
+6.  Save the generated accounts (including private keys) to `accounts.txt`.
+7.  Start generating the transaction workload as defined in the configuration.
+
+### Recovery Mode
+
+The setup process, especially the faucet distribution, can be time-consuming and costly. If this process has already been completed once, you can use **recovery mode** to skip it and jump directly to generating the transaction workload.
+
+To use recovery mode, run the benchmark with the `--recover` flag:
+```bash
+cargo run --release -- --recover
+```
+
+In recovery mode, the application will:
+1.  Skip contract deployment, account generation, and faucet distribution.
+2.  Load the existing contract configuration from the file specified in `contract_config_path`.
+3.  Load the pre-funded accounts from `accounts.txt`.
+4.  Start generating the transaction workload immediately.
+
+This allows you to quickly restart the benchmark using the same set of contracts and funded accounts. 
+
+## Docker Deployment
+
+For a more isolated and reproducible environment, you can use Docker to run the benchmark.
+
+### Prerequisites
+
+*   [Docker](https://docs.docker.com/get-docker/)
+*   [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Building the Docker Image
+
+The included `Dockerfile` handles all the necessary setup, including installing dependencies, cloning contracts, and building the Rust application.
+
+To build the image, run the following command from the project root:
+
+```bash
+docker compose build
+```
+
+Or, using Docker directly:
+
+```bash
+docker build -t gravity_bench .
+```
+
+### Running with Docker Compose
+
+`docker-compose` is the recommended way to run the application, as it simplifies volume mounting and command execution.
+
+**1. Configure `bench_config.toml`:**
+
+Make sure your `bench_config.toml` is configured correctly. If you are connecting to a local Ethereum node on your host machine, you can use `http://localhost:8545` as the `rpc_url` because the Docker Compose file is configured to use the host network.
+
+**2. Run the benchmark:**
+
+The `docker-compose.yml` is configured to run the application with the default `bench_config.toml`.
+
+```bash
+docker compose run --rm gravity_bench
+```
+
+This will start the benchmark, and you will see the output in your terminal. The `--rm` flag automatically removes the container when it exits.
+
+**Important Note about File Storage:**
+
+The current Docker configuration uses `/tmp` for temporary file storage. This means:
+- ✅ **Simplified permissions** - No volume mounting issues
+- ✅ **Clean runs** - Each container run starts fresh
+- ❌ **No recovery mode** - Generated files (`deploy.json`, `accounts.txt`) are not preserved between runs
+- ❌ **Data not accessible** - Generated files cannot be inspected on the host machine
+
+This configuration is ideal for:
+- One-time benchmarking runs
+- Performance testing without state persistence
+- Simplified Docker deployment
+
+If you need to preserve generated files or use recovery mode, you can modify the Docker configuration to mount persistent volumes.
+
+**3. Running in Recovery Mode:**
+
+⚠️ **Recovery mode is not available** with the current `/tmp` configuration, as the required files (`deploy.json` and `accounts.txt`) are not persisted between container runs.
+
+If you need recovery mode, you must configure persistent volume mounts in `docker-compose.yml`.
+
+
+### File Access and Persistence
+
+**Current Configuration (`/tmp`):**
+- Generated files (`deploy.json`, `accounts.txt`) are stored temporarily in the container
+- Files are automatically cleaned up when the container exits
+- No files are accessible on the host machine after the run

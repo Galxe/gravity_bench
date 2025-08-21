@@ -1,0 +1,16 @@
+services:
+  gravity_bench:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gravity_bench
+    # 'host' network mode is needed to connect to a local node (e.g., http://localhost:8545)
+    # If your node is remote, you can use 'bridge' mode.
+    network_mode: "host"
+    volumes:
+      # Mount config file into the container
+      - ./bench_config.toml:/tmp/bench_config.toml
+    # The command to run. You can override this from the command line.
+    # For example, to run in recovery mode:
+    # docker-compose run --rm gravity_bench -- --recover
+    command: ["--config", "bench_config.toml"]

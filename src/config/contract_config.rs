@@ -17,11 +17,11 @@ pub struct Addresses {
     pub deployer: String,
     #[serde(rename = "uniswap_v2_factory")]
     #[allow(unused)]
-    pub uniswap_v2_factory: String,
+    pub uniswap_v2_factory: Option<String>,
     #[serde(rename = "uniswap_v2_router")]
-    pub uniswap_v2_router: String,
+    pub uniswap_v2_router: Option<String>,
     #[allow(unused)]
-    pub weth9: String,
+    pub weth9: Option<String>,
     pub tokens: Vec<Token>,
     #[serde(rename = "liquidity_eth_pairs")]
     #[allow(unused)]
@@ -87,14 +87,18 @@ impl ContractConfig {
 
     /// Get router address as Address type
     pub fn get_router_address(&self) -> anyhow::Result<Address> {
-        Address::from_str(&self.addresses.uniswap_v2_router)
+        Address::from_str(&self.addresses.uniswap_v2_router.as_ref().unwrap_or_else(
+            || panic!("Uniswap V2 router address not found")
+        ))
             .map_err(|e| anyhow::anyhow!("Invalid router address: {}", e))
     }
 
     /// Get WETH address as Address type
     #[allow(unused)]
     pub fn get_weth_address(&self) -> anyhow::Result<Address> {
-        Address::from_str(&self.addresses.weth9)
+        Address::from_str(&self.addresses.weth9.as_ref().unwrap_or_else(
+            || panic!("WETH address not found")
+        ))
             .map_err(|e| anyhow::anyhow!("Invalid WETH address: {}", e))
     }
 
