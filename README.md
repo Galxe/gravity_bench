@@ -53,7 +53,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
 
 ## Configuration
 
-Edit `bench_config.toml` to set up your benchmark run.
+Edit `bench_config.toml` to set up your benchmark run. This is the default configuration file, but you can specify a different one using the `--config` command-line argument when running the benchmark.
 
 ```toml
 # Number of accounts to generate for the test
@@ -97,16 +97,55 @@ chain_id = 31337
 
 ## Running the Benchmark
 
-Once the configuration is set up, you can run the benchmark using Cargo.
+Once the configuration is set up, you can run the benchmark using `cargo run`.
 
+### Command-Line Arguments
+
+When using `cargo run`, arguments for `gravity_bench` itself must be passed after a `--` separator. Arguments before the separator are for Cargo (e.g., `--release` to build with optimizations).
+
+**Syntax:**
+`cargo run [<cargo_args>] -- [<application_args>]`
+
+**Available Arguments:**
+
+*   `--config <PATH>`: Specifies the path to the configuration file. Defaults to `bench_config.toml`.
+    ```bash
+    cargo run --release -- --config custom_config.toml
+    ```
+*   `--recover`: Enables recovery mode. This is useful for re-running a benchmark without repeating the initial setup. See the "Recovery Mode" section for details.
+    ```bash
+    cargo run --release -- --recover
+    ```
+
+You can combine arguments:
 ```bash
-cargo run --release
+cargo run --release -- --config custom_config.toml --recover
 ```
 
-The application will perform the following steps:
+### Normal Workflow
+
+By default (without the `--recover` flag), the application will perform the following setup steps:
 1.  Connect to the specified Ethereum node.
 2.  Deploy the necessary ERC20 tokens and (if `enable_swap_token` is true) a Uniswap V2 router and liquidity pools.
-3.  Save the addresses of the deployed contracts to `contract.json` (or the path specified in `contract_config_path`).
+3.  Save the addresses of the deployed contracts to the file specified in `contract_config_path` (e.g., `contract.json`).
 4.  Generate the specified number of test accounts.
-5.  Fund the test accounts with ETH and ERC20 tokens from the faucet account.
-6.  Start generating the transaction workload as defined in the configuration. 
+5.  Fund the test accounts with ETH and ERC20 tokens from the faucet account. This step can take some time.
+6.  Save the generated accounts (including private keys) to `accounts.txt`.
+7.  Start generating the transaction workload as defined in the configuration.
+
+### Recovery Mode
+
+The setup process, especially the faucet distribution, can be time-consuming and costly. If this process has already been completed once, you can use **recovery mode** to skip it and jump directly to generating the transaction workload.
+
+To use recovery mode, run the benchmark with the `--recover` flag:
+```bash
+cargo run --release -- --recover
+```
+
+In recovery mode, the application will:
+1.  Skip contract deployment, account generation, and faucet distribution.
+2.  Load the existing contract configuration from the file specified in `contract_config_path`.
+3.  Load the pre-funded accounts from `accounts.txt`.
+4.  Start generating the transaction workload immediately.
+
+This allows you to quickly restart the benchmark using the same set of contracts and funded accounts. 

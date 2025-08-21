@@ -31,6 +31,9 @@ use crate::{
 struct Args {
     #[arg(long, default_value_t = false)]
     recover: bool,
+
+    #[arg(long, default_value = "bench_config.toml")]
+    config: String,
 }
 
 // mod uniswap;
@@ -178,7 +181,7 @@ fn run_command(command: &str) -> Result<Output> {
 #[actix::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let benchmark_config = BenchConfig::load("bench_config.toml").unwrap();
+    let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
