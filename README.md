@@ -56,36 +56,36 @@ This design allows for creating flexible and complex benchmarking scenarios.
 Edit `bench_config.toml` to set up your benchmark run. This is the default configuration file, but you can specify a different one using the `--config` command-line argument when running the benchmark.
 
 ```toml
-# Number of accounts to generate for the test
-num_accounts = 100
-# Target transactions per second
-target_tps = 50
-# Path for the generated contract configuration
-contract_config_path = "contract.json"
-# Number of ERC20 tokens to deploy
-num_tokens = 5
-# Enable swapping tokens on a DEX (if false, it will only do ERC20 transfers)
+# Gravity Bench Configuration File
+
+# Uniswap configuration file path
+contract_config_path = "deploy.json"
+target_tps = 10000
+nodes = [
+    { rpc_url = "http://localhost:8545", chain_id = 7771625 },
+]
+num_tokens=2
 enable_swap_token = false
-
-# Faucet account used to distribute funds to test accounts
+# Faucet and deployer account configuration
 [faucet]
-private_key = "YOUR_FAUCET_PRIVATE_KEY"
+# Private key (example, please replace with real private key)
+private_key = "xxxxx"
+# Faucet Level: Controls the depth of cascading faucet levels
+# Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
+# Value 0: Disables cascading, processes data directly
+faucet_level = 10 
 
-# Configuration for the generated accounts
+# Load testing account configuration
 [accounts]
-num_accounts = 100
+# Number of load testing accounts to generate
+num_accounts = 10000
 
-# Performance-related settings
+# Performance and stress configuration
 [performance]
-# Number of concurrent transaction senders
-num_senders = 10
-# Maximum number of transactions to keep in the mempool tracker
-max_pool_size = 10000
-
-# List of Ethereum nodes to connect to
-[[nodes]]
-rpc_url = "http://localhost:8545"
-chain_id = 31337
+# Number of concurrent transaction sending tasks inside TxnConsumer
+num_senders = 1000
+# Maximum capacity of the transaction pool inside Consumer
+max_pool_size = 100000
 ```
 
 **Key configuration options:**
