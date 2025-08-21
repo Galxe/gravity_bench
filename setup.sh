@@ -41,6 +41,30 @@ else
     log "info" "Python version: $(python3 --version)"
 fi
 
+# Check for Rust and Cargo
+if ! command_exists cargo || ! command_exists rustc; then
+    log "warn" "Rust or Cargo is not installed. Attempting to install Rust..."
+    # Download and install Rust using rustup
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    
+    # Source the cargo environment
+    source "$HOME/.cargo/env"
+    
+    # Check if installation was successful
+    if command_exists cargo && command_exists rustc; then
+        log "success" "Rust and Cargo installed successfully."
+        log "info" "Rust version: $(rustc --version)"
+        log "info" "Cargo version: $(cargo --version)"
+    else
+        log "error" "Failed to install Rust. Please install it manually from https://rustup.rs/"
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
+else
+    log "success" "Rust and Cargo are installed."
+    log "info" "Rust version: $(rustc --version)"
+    log "info" "Cargo version: $(cargo --version)"
+fi
+
 # Exit if any check failed
 if [ "$FAILED_CHECKS" -ne 0 ]; then
     log "error" "Environment checks failed. Please install the missing dependencies and run the script again."
@@ -109,12 +133,21 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     log "info" "To activate the Python virtual environment, run:"
     log "info" "  source venv/bin/activate"
     log "info" ""
+    log "info" "If Rust was installed during this setup, you may also need to run:"
+    log "info" "  source ~/.cargo/env"
+    log "info" ""
     log "info" "Alternatively, next time run the setup script with:"
     log "info" "  source setup.sh"
-    log "info" "This will keep the virtual environment active in your current shell."
+    log "info" "This will keep both environments active in your current shell."
 else
     # Script was sourced (source setup.sh)
     log "success" "Python virtual environment is now ACTIVE and ready to use!"
     log "info" "You can now run Python scripts directly."
     log "info" "To deactivate the virtual environment later, run: deactivate"
+    
+    # Check if Rust was installed and source it
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+        log "info" "Rust environment has been loaded."
+    fi
 fi
