@@ -81,6 +81,7 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
     chain_id: u64,
     producer: &Addr<Producer>,
     faucet_name: &str,
+    wait_duration_secs: u64,
 ) -> Result<()> {
     let total_faucet_levels = faucet_builder.total_levels();
     info!(
@@ -98,7 +99,9 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
 
         let rx = run_plan(faucet_level_plan, producer).await?;
         rx.await??;
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        if wait_duration_secs > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(wait_duration_secs)).await;
+        }
         info!(
             "{} faucet distribution for LEVEL {} completed successfully.",
             faucet_name, level
@@ -285,7 +288,14 @@ async fn main() -> Result<()> {
                 * U256::from(1000_000_000_000u64),
         )
         .unwrap();
-        execute_faucet_distribution(eth_faucet_builder, chain_id, &producer, "ETH").await?;
+        execute_faucet_distribution(
+            eth_faucet_builder,
+            chain_id,
+            &producer,
+            "ETH",
+            benchmark_config.faucet.wait_duration_secs,
+        )
+        .await?;
 
         let all_token_addresses = contract_config.get_all_token_addresses();
         let faucet_signer_for_token =
@@ -322,6 +332,7 @@ async fn main() -> Result<()> {
                 chain_id,
                 &producer,
                 &format!("Token {}", token),
+                benchmark_config.faucet.wait_duration_secs,
             )
             .await?;
         }
