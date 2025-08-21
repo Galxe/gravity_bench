@@ -24,6 +24,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
 
 *   **Rust**: [Install Rust](https://www.rust-lang.org/tools/install)
 *   **Node.js and npm**: [Install Node.js](https://nodejs.org/en/download/)
+*   **Python 3 and pip**: The setup scripts require Python. It is highly recommended to use a virtual environment.
 *   **An Ethereum node with RPC endpoint enabled**: The tool needs an RPC endpoint to connect to.
 
 ## Setup
@@ -34,8 +35,17 @@ This design allows for creating flexible and complex benchmarking scenarios.
     cd gravity_bench
     ```
 
-2.  **Install contract dependencies:**
-    The project relies on external smart contracts (from Uniswap and OpenZeppelin). A setup script is provided to download them.
+2.  **Set up Python environment and Install Dependencies:**
+    It is recommended to use a Python virtual environment to avoid conflicts with system-wide packages.
+    ```bash
+    # Create a virtual environment named 'venv'
+    python3 -m venv venv
+
+    # Activate the virtual environment
+    # On Windows, use: venv\Scripts\activate
+    source venv/bin/activate
+    ```
+    With the virtual environment active, run the setup script. It will install both Python and Node.js dependencies.
     ```bash
     bash setup.sh
     ```
@@ -45,6 +55,7 @@ This design allows for creating flexible and complex benchmarking scenarios.
     python scripts/refresh_init_code.py
     ```
     and replace the init code in contracts/v2-periphery/contracts/libraries/UniswapV2Library.sol
+
 3.  **Create the configuration file:**
     Copy the template to create your own configuration file.
     ```bash
@@ -149,3 +160,75 @@ In recovery mode, the application will:
 4.  Start generating the transaction workload immediately.
 
 This allows you to quickly restart the benchmark using the same set of contracts and funded accounts. 
+
+## Docker Deployment
+
+For a more isolated and reproducible environment, you can use Docker to run the benchmark.
+
+### Prerequisites
+
+*   [Docker](https://docs.docker.com/get-docker/)
+*   [Docker Compose](https://docs.docker.com/compose/install/)
+
+### Building the Docker Image
+
+The included `Dockerfile` handles all the necessary setup, including installing dependencies, cloning contracts, and building the Rust application.
+
+To build the image, run the following command from the project root:
+
+```bash
+docker compose build
+```
+
+Or, using Docker directly:
+
+```bash
+docker build -t gravity_bench .
+```
+
+### Running with Docker Compose
+
+`docker-compose` is the recommended way to run the application, as it simplifies volume mounting and command execution.
+
+**1. Configure `bench_config.toml`:**
+
+Make sure your `bench_config.toml` is configured correctly. If you are connecting to a local Ethereum node on your host machine, you can use `http://localhost:8545` as the `rpc_url` because the Docker Compose file is configured to use the host network.
+
+**2. Run the benchmark:**
+
+The `docker-compose.yml` is configured to run the application with the default `bench_config.toml`.
+
+```bash
+docker compose run --rm gravity_bench
+```
+
+This will start the benchmark, and you will see the output in your terminal. The `--rm` flag automatically removes the container when it exits.
+
+**Important Note about File Storage:**
+
+The current Docker configuration uses `/tmp` for temporary file storage. This means:
+- ✅ **Simplified permissions** - No volume mounting issues
+- ✅ **Clean runs** - Each container run starts fresh
+- ❌ **No recovery mode** - Generated files (`deploy.json`, `accounts.txt`) are not preserved between runs
+- ❌ **Data not accessible** - Generated files cannot be inspected on the host machine
+
+This configuration is ideal for:
+- One-time benchmarking runs
+- Performance testing without state persistence
+- Simplified Docker deployment
+
+If you need to preserve generated files or use recovery mode, you can modify the Docker configuration to mount persistent volumes.
+
+**3. Running in Recovery Mode:**
+
+⚠️ **Recovery mode is not available** with the current `/tmp` configuration, as the required files (`deploy.json` and `accounts.txt`) are not persisted between container runs.
+
+If you need recovery mode, you must configure persistent volume mounts in `docker-compose.yml`.
+
+
+### File Access and Persistence
+
+**Current Configuration (`/tmp`):**
+- Generated files (`deploy.json`, `accounts.txt`) are stored temporarily in the container
+- Files are automatically cleaned up when the container exits
+- No files are accessible on the host machine after the run

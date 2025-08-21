@@ -30,6 +30,22 @@ def install_solc_versions():
         except Exception as e:
             print(f"Could not install/check solc v{v}. It might already be installed. Error: {e}")
 
+def safe_set_solc_version(version):
+    """Safely set solc version, installing if necessary."""
+    try:
+        set_solc_version(version)
+        print(f"Using solc version {version}")
+    except Exception as e:
+        print(f"Error setting solc version {version}: {e}")
+        print(f"Attempting to install solc {version}...")
+        try:
+            install_solc(version)
+            set_solc_version(version)
+            print(f"Successfully installed and set solc version {version}")
+        except Exception as e2:
+            print(f"Failed to install solc {version}: {e2}")
+            raise
+
 def compile_all_contracts():
     """Compiles all necessary smart contracts at once."""
     install_solc_versions()
@@ -38,7 +54,7 @@ def compile_all_contracts():
     project_root = os.path.abspath('.')
     
     # --- Compile Uniswap V2 Core ---
-    set_solc_version("0.5.16")
+    safe_set_solc_version("0.5.16")
     print("Compiling Uniswap V2 Factory...")
     factory_path = os.path.join(project_root, 'contracts/v2-core/contracts/UniswapV2Factory.sol')
     factory_compiled = compile_files(
@@ -47,7 +63,7 @@ def compile_all_contracts():
     )
     
     # --- Compile Uniswap V2 Periphery ---
-    set_solc_version("0.6.6")
+    safe_set_solc_version("0.6.6")
     print("Compiling Uniswap V2 Router...")
     router_path = os.path.join(project_root, 'contracts/v2-periphery/contracts/UniswapV2Router02.sol')
     core_path_remap = os.path.join(project_root, 'contracts/v2-core')
@@ -63,7 +79,7 @@ def compile_all_contracts():
     )
 
     # --- Compile Custom Tokens & WETH ---
-    set_solc_version("0.8.20")
+    safe_set_solc_version("0.8.20")
     print("Compiling MyToken and WETH9...")
     openzeppelin_path = os.path.join(project_root, "node_modules/@openzeppelin")
     custom_files = [
