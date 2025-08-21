@@ -26,7 +26,8 @@ pub struct NodeConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FaucetConfig {
     pub private_key: String,
-    pub faucet_level: u64,
+    pub faucet_level: u32,
+    pub wait_duration_secs: u64,
 }
 
 /// Load testing account configuration

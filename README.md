@@ -91,6 +91,9 @@ private_key = "xxxxx"
 # Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
 # Value 0: Disables cascading, processes data directly
 faucet_level = 10 
+# Wait duration in seconds between faucet distribution levels
+# If you encounter 'insufficient funds' errors, try increasing this value
+wait_duration_secs = 60
 
 # Load testing account configuration
 [accounts]
@@ -111,6 +114,7 @@ max_pool_size = 100000
 *   `nodes.rpc_url`: The RPC endpoint of the Ethereum node.
 *   `target_tps`: The desired number of transactions per second.
 *   `enable_swap_token`: Set to `true` to benchmark Uniswap V2 swaps, or `false` for simple ERC20 transfers.
+*   `faucet.wait_duration_secs`: The number of seconds to wait between faucet distribution levels. If you encounter `insufficient funds` errors during the setup phase, increasing this value can help by allowing more time for transactions to be mined and account balances to be updated.
 
 ## Running the Benchmark
 
