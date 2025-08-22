@@ -109,6 +109,7 @@ num_accounts = 10000
 num_senders = 1000
 # Maximum capacity of the transaction pool inside Consumer
 max_pool_size = 100000
+duration_secs = 60
 ```
 
 **Key configuration options:**
@@ -118,6 +119,7 @@ max_pool_size = 100000
 *   `target_tps`: The desired number of transactions per second.
 *   `enable_swap_token`: Set to `true` to benchmark Uniswap V2 swaps, or `false` for simple ERC20 transfers.
 *   `faucet.wait_duration_secs`: The number of seconds to wait between faucet distribution levels. If you encounter `insufficient funds` errors during the setup phase, increasing this value can help by allowing more time for transactions to be mined and account balances to be updated.
+*   `performance.duration_secs`: The duration of the benchmark in seconds. If set to `0`, the benchmark will run indefinitely.
 
 ## Running the Benchmark
 
