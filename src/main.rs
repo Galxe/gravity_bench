@@ -188,9 +188,9 @@ async fn main() -> Result<()> {
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
+        .with_file(false)
+        .with_line_number(false)
+        .with_thread_ids(false)
         .init();
 
     let (contract_config, accounts) = if args.recover {
