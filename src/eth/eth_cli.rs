@@ -15,7 +15,20 @@ use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 use url::Url;
-use comfy_table::{Table, Row, Cell, presets::UTF8_FULL, Attribute, Color};
+use comfy_table::{Table, Cell, presets::UTF8_FULL, Attribute, Color};
+
+/// Format large numbers with appropriate suffixes (K, M, B)
+fn format_large_number(num: u64) -> String {
+    if num >= 1_000_000_000 {
+        format!("{:.1}B", num as f64 / 1_000_000_000.0)
+    } else if num >= 1_000_000 {
+        format!("{:.1}M", num as f64 / 1_000_000.0)
+    } else if num >= 10_000 {
+        format!("{:.1}K", num as f64 / 1_000.0)
+    } else {
+        num.to_string()
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct MethodMetrics {
@@ -335,19 +348,15 @@ impl EthHttpCli {
         let mut table = Table::new();
         table.load_preset(UTF8_FULL);
         
-        // Set table header
+        // Set proper column headers for RPC metrics
         table.set_header(vec![
-            Cell::new(&format!("RPC Metrics Summary for [{}]", self.rpc))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Cyan)
+            "RPC Method",
+            "Sent", 
+            "Succeeded",
+            "Failed",
+            "Success Rate",
+            "Avg Latency"
         ]);
-        
-        // Add sub-header for column names
-        table.add_row(Row::from(vec![
-            Cell::new("Method | Sent | Succeeded | Failed | Success Rate | Avg Latency")
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Yellow)
-        ]));
         
         // Add data rows
         for (method, stats) in &metrics.per_method {
@@ -370,18 +379,40 @@ impl EthHttpCli {
                 Color::Red
             };
 
-            table.add_row(Row::from(vec![
-                Cell::new(&format!(
-                    "{:<25} | {:>4} | {:>9} | {:>6} | {:>10.2}% | {:>9.2}ms",
-                    method,
-                    stats.requests_sent,
-                    stats.requests_succeeded,
-                    stats.requests_failed,
-                    success_rate,
-                    avg_latency
-                )).fg(color)
-            ]));
+            table.add_row(vec![
+                Cell::new(method).fg(Color::Cyan),
+                Cell::new(&format_large_number(stats.requests_sent)).fg(Color::White),
+                Cell::new(&format_large_number(stats.requests_succeeded)).fg(Color::Green),
+                Cell::new(&format_large_number(stats.requests_failed)).fg(if stats.requests_failed > 0 { Color::Red } else { Color::Green }),
+                Cell::new(&format!("{:.1}%", success_rate)).fg(color),
+                Cell::new(&format!("{:.1}ms", avg_latency)).fg(if avg_latency > 100.0 { Color::Yellow } else { Color::Green }),
+            ]);
         }
+        
+        // Add summary row for RPC metrics
+        let total_sent: u64 = metrics.per_method.values().map(|m| m.requests_sent).sum();
+        let total_succeeded: u64 = metrics.per_method.values().map(|m| m.requests_succeeded).sum();
+        let total_failed: u64 = metrics.per_method.values().map(|m| m.requests_failed).sum();
+        let overall_success_rate = if total_sent > 0 {
+            total_succeeded as f64 / total_sent as f64 * 100.0
+        } else {
+            0.0
+        };
+        let overall_avg_latency = if total_sent > 0 {
+            let total_latency: u64 = metrics.per_method.values().map(|m| m.total_latency_ms).sum();
+            total_latency as f64 / total_sent as f64
+        } else {
+            0.0
+        };
+        
+        table.add_row(vec![
+            Cell::new("TOTAL").add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_sent)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_succeeded)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_failed)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}%", overall_success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}ms", overall_avg_latency)).add_attribute(Attribute::Bold).fg(Color::Magenta),
+        ]);
         
         println!("{}", table);
     }

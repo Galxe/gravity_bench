@@ -17,6 +17,19 @@ const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
 
+/// Format large numbers with appropriate suffixes (K, M, B)
+fn format_large_number(num: u64) -> String {
+    if num >= 1_000_000_000 {
+        format!("{:.1}B", num as f64 / 1_000_000_000.0)
+    } else if num >= 1_000_000 {
+        format!("{:.1}M", num as f64 / 1_000_000.0)
+    } else if num >= 10_000 {
+        format!("{:.1}K", num as f64 / 1_000.0)
+    } else {
+        num.to_string()
+    }
+}
+
 /// Transaction and plan lifecycle tracker
 pub struct TxnTracker {
     /// Plan tracker
@@ -467,20 +480,23 @@ impl TxnTracker {
         table.set_header(vec![
             "Plan Name",
             "Progress", 
-            "Success Rate",
-            "Sub Fails",
-            "Exec Fails",
+            "Success%",
+            "SubFail",
+            "ExecFail",
             "Status"
         ]);
         
         // Add individual plan rows
         if !self.plan_trackers.is_empty() {
             for (_plan_id, tracker) in &self.plan_trackers {
-                let plan_success_rate = if tracker.produce_transactions > 0 {
+                let plan_success_rate = if tracker.resolved_transactions > 0 {
                     let successful = tracker.resolved_transactions.saturating_sub(tracker.failed_submissions + tracker.failed_executions);
-                    successful as f64 / tracker.produce_transactions as f64 * 100.0
-                } else {
+                    successful as f64 / tracker.resolved_transactions as f64 * 100.0
+                } else if tracker.produce_transactions > 0 {
+                    // If no transactions resolved yet, can't calculate success rate
                     0.0
+                } else {
+                    100.0
                 };
                 
                 let progress_color = if tracker.resolved_transactions as usize >= tracker.produce_transactions {
@@ -501,27 +517,33 @@ impl TxnTracker {
                 
                 table.add_row(vec![
                     Cell::new(&tracker.plan_name).fg(Color::Cyan),
-                    Cell::new(&format!("{}/{}", tracker.resolved_transactions, tracker.produce_transactions)).fg(progress_color),
-                    Cell::new(&format!("{:.1}%", plan_success_rate)).fg(if plan_success_rate >= 95.0 { Color::Green } else if plan_success_rate >= 80.0 { Color::Yellow } else { Color::Red }),
-                    Cell::new(&tracker.failed_submissions.to_string()).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
-                    Cell::new(&tracker.failed_executions.to_string()).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
+                    Cell::new(&format!("{}/{}", 
+                        format_large_number(tracker.resolved_transactions),
+                        format_large_number(tracker.produce_transactions as u64)
+                    )).fg(progress_color),
+                    Cell::new(&format!("{:.1}", plan_success_rate)).fg(if plan_success_rate >= 95.0 { Color::Green } else if plan_success_rate >= 80.0 { Color::Yellow } else { Color::Red }),
+                    Cell::new(&format_large_number(tracker.failed_submissions)).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
+                    Cell::new(&format_large_number(tracker.failed_executions)).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
                     Cell::new(status).fg(if status.contains("Completed") { Color::Green } else { Color::Yellow }),
                 ]);
             }
         } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
-            let plan_success_rate = if tracker.produce_transactions > 0 {
+            let plan_success_rate = if tracker.resolved_transactions > 0 {
                 let successful = tracker.resolved_transactions.saturating_sub(tracker.failed_submissions + tracker.failed_executions);
-                successful as f64 / tracker.produce_transactions as f64 * 100.0
+                successful as f64 / tracker.resolved_transactions as f64 * 100.0
             } else {
-                0.0
+                100.0
             };
             
             table.add_row(vec![
                 Cell::new(&format!("{} (Last)", tracker.plan_name)).fg(Color::DarkGrey),
-                Cell::new(&format!("{}/{}", tracker.resolved_transactions, tracker.produce_transactions)).fg(Color::Green),
-                Cell::new(&format!("{:.1}%", plan_success_rate)).fg(Color::Green),
-                Cell::new(&tracker.failed_submissions.to_string()).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
-                Cell::new(&tracker.failed_executions.to_string()).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
+                Cell::new(&format!("{}/{}", 
+                    format_large_number(tracker.resolved_transactions),
+                    format_large_number(tracker.produce_transactions as u64)
+                )).fg(Color::Green),
+                Cell::new(&format!("{:.1}", plan_success_rate)).fg(Color::Green),
+                Cell::new(&format_large_number(tracker.failed_submissions)).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
+                Cell::new(&format_large_number(tracker.failed_executions)).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
                 Cell::new("Done").fg(Color::Green),
             ]);
         }
@@ -529,11 +551,14 @@ impl TxnTracker {
         // Add summary row
         table.add_row(vec![
             Cell::new("TOTAL").add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&format!("{}/{}", self.total_resolved_transactions, self.total_produced_transactions)).add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&format!("{:.1}%", success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&self.total_failed_submissions.to_string()).add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&self.total_failed_executions.to_string()).add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&format!("TPS: {:.2}", tps)).add_attribute(Attribute::Bold).fg(Color::Magenta),
+            Cell::new(&format!("{}/{}", 
+                format_large_number(self.total_resolved_transactions),
+                format_large_number(self.total_produced_transactions)
+            )).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}", success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(self.total_failed_submissions)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(self.total_failed_executions)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("TPS:{:.1}", tps)).add_attribute(Attribute::Bold).fg(Color::Magenta),
         ]);
         
         println!("{}", table);
