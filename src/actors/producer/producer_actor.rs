@@ -146,7 +146,7 @@ impl Producer {
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
     ) -> Result<(), anyhow::Error> {
-        tracing::info!("Starting execution of plan: {}", plan.name());
+        tracing::debug!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
@@ -226,7 +226,7 @@ impl Actor for Producer {
         .into_actor(self)
         .wait(ctx);
         ctx.run_interval(Duration::from_secs(5), |act, _ctx| {
-            tracing::info!("Producer stats: plans_num={}, sending_txns={}, ready_accounts={}, success_plans_num={}, failed_plans_num={}, success_txns={}, failed_txns={}", act.stats.remain_plans_num, act.stats.sending_txns.load(Ordering::Relaxed), act.stats.ready_accounts.load(Ordering::Relaxed), act.stats.success_plans_num, act.stats.failed_plans_num, act.stats.success_txns, act.stats.failed_txns);
+            tracing::debug!("Producer stats: plans_num={}, sending_txns={}, ready_accounts={}, success_plans_num={}, failed_plans_num={}, success_txns={}, failed_txns={}", act.stats.remain_plans_num, act.stats.sending_txns.load(Ordering::Relaxed), act.stats.ready_accounts.load(Ordering::Relaxed), act.stats.success_plans_num, act.stats.failed_plans_num, act.stats.success_txns, act.stats.failed_txns);
         });
     }
 
@@ -314,7 +314,7 @@ impl Handler<RegisterTxnPlan> for Producer {
 
         self.stats.remain_plans_num += 1;
         let plan_id = msg.plan.id().clone();
-        tracing::info!(
+        tracing::debug!(
             "Registering new plan '{}' (id={}).",
             msg.plan.name(),
             plan_id
