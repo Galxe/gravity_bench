@@ -330,7 +330,13 @@ impl EthHttpCli {
         }
 
         println!("┌─────────────────────────────────────────────────────────────────────────────────────────┐");
-        println!("│                           🌐 RPC Metrics Summary for [{}]                           │", self.rpc);
+        // Center the title properly within 89 characters
+        let title = format!("🌐 RPC Metrics Summary for [{}]", self.rpc);
+        let padding = (89 - title.len()) / 2;
+        println!("│{}{}{}│", 
+                 " ".repeat(padding),
+                 title,
+                 " ".repeat(89 - padding - title.len()));
         println!("├─────────────────────────────────────────────────────────────────────────────────────────┤");
         for (method, stats) in &metrics.per_method {
             let success_rate = if stats.requests_sent > 0 {
@@ -345,7 +351,7 @@ impl EthHttpCli {
             };
 
             println!(
-                "│ Method: {:<25} | Sent: {:<5} | ✅ {:<5} | ❌ {:<5} | Success: {:>6.2}% | Latency: {:>8.2}ms │",
+                "│ Method: {:<25} | Sent: {:<5} | ✅ {:<5} | ❌ {:<5} | Success: {:>6.2}% | Latency: {:>7.2}ms │",
                 method,
                 stats.requests_sent,
                 stats.requests_succeeded,
