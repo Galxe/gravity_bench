@@ -43,6 +43,8 @@ pub struct PerformanceConfig {
     pub num_senders: usize,
     /// Maximum capacity of the transaction pool inside Consumer
     pub max_pool_size: usize,
+    /// Duration of the benchmark in seconds
+    pub duration_secs: u64,
 }
 
 impl BenchConfig {

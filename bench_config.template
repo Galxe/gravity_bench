@@ -23,11 +23,13 @@ wait_duration_secs = 60
 # Load testing account configuration
 [accounts]
 # Number of load testing accounts to generate
-num_accounts = 10000
+num_accounts = 100000
 
 # Performance and stress configuration
 [performance]
 # Number of concurrent transaction sending tasks inside TxnConsumer
-num_senders = 1000
+num_senders = 1500
 # Maximum capacity of the transaction pool inside Consumer
 max_pool_size = 100000
+# Duration of the benchmark in seconds. Set to 0 to run indefinitely.
+duration_secs = 60
