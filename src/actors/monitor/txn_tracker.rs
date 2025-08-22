@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use alloy::primitives::TxHash;
 use tracing::{debug, error, warn};
+use comfy_table::{Table, Row, Cell, presets::UTF8_FULL, Attribute, Color};
 
 use crate::actors::monitor::SubmissionResult;
 use crate::eth::EthHttpCli;
@@ -461,30 +462,44 @@ impl TxnTracker {
             0.0
         };
 
-        // Use consistent width with RPC metrics table (93 chars)
-        println!("┌─────────────────────────────────────────────────────────────────────────────────────────┐");
-        if !summary_str.is_empty() {
-            // Truncate long plan names if needed
-            let display_plans = if summary_str.len() > 35 {
-                format!("{}...", &summary_str[..32])
-            } else {
-                summary_str.clone()
-            };
-            println!("│ 📊 Transaction Statistics                        Plans: {:<35} │", display_plans);
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        
+        // Set table header
+        let header_text = if !summary_str.is_empty() {
+            format!("Transaction Statistics - Plans: {}", summary_str)
         } else {
-            println!("│ 📊 Transaction Statistics                                                           │");
-        }
-        println!("├─────────────────────────────────────────────────────────────────────────────────────────┤");
-        println!("│ 🚀 Produced: {:<8} │ ✅ Resolved: {:<8} │ 📈 Success Rate: {:>6.2}% │ ⚡ TPS: {:>7.2} │", 
-                 self.total_produced_transactions,
-                 self.total_resolved_transactions, 
-                 success_rate,
-                 tps);
+            "Transaction Statistics".to_string()
+        };
+        
+        table.set_header(vec![
+            Cell::new(&header_text)
+                .add_attribute(Attribute::Bold)
+                .fg(Color::Blue)
+        ]);
+        
+        // Add main statistics row
+        table.add_row(Row::from(vec![
+            Cell::new(&format!(
+                "Produced: {} | Resolved: {} | Success Rate: {:.2}% | TPS: {:.2}",
+                self.total_produced_transactions,
+                self.total_resolved_transactions,
+                success_rate,
+                tps
+            )).fg(Color::Green)
+        ]));
+        
+        // Add failure statistics if any
         if self.total_failed_submissions > 0 || self.total_failed_executions > 0 {
-            println!("│ ❌ Submission Fails: {:<5} │ 💥 Execution Fails: {:<5}                                │",
-                     self.total_failed_submissions,
-                     self.total_failed_executions);
+            table.add_row(Row::from(vec![
+                Cell::new(&format!(
+                    "Submission Fails: {} | Execution Fails: {}",
+                    self.total_failed_submissions,
+                    self.total_failed_executions
+                )).fg(Color::Red)
+            ]));
         }
-        println!("└─────────────────────────────────────────────────────────────────────────────────────────┘");
+        
+        println!("{}", table);
     }
 }

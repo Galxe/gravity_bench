@@ -15,6 +15,7 @@ use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 use url::Url;
+use comfy_table::{Table, Row, Cell, presets::UTF8_FULL, Attribute, Color};
 
 #[derive(Debug, Default, Clone)]
 pub struct MethodMetrics {
@@ -325,19 +326,28 @@ impl EthHttpCli {
     pub async fn log_metrics_summary(&self) {
         let metrics = self.get_metrics().await;
         if metrics.per_method.is_empty() {
-            println!("🌐 RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
+            println!("RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
             return;
         }
 
-        println!("┌─────────────────────────────────────────────────────────────────────────────────────────┐");
-        // Center the title properly within 89 characters
-        let title = format!("🌐 RPC Metrics Summary for [{}]", self.rpc);
-        let padding = (89 - title.len()) / 2;
-        println!("│{}{}{}│", 
-                 " ".repeat(padding),
-                 title,
-                 " ".repeat(89 - padding - title.len()));
-        println!("├─────────────────────────────────────────────────────────────────────────────────────────┤");
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        
+        // Set table header
+        table.set_header(vec![
+            Cell::new(&format!("RPC Metrics Summary for [{}]", self.rpc))
+                .add_attribute(Attribute::Bold)
+                .fg(Color::Cyan)
+        ]);
+        
+        // Add sub-header for column names
+        table.add_row(Row::from(vec![
+            Cell::new("Method | Sent | Succeeded | Failed | Success Rate | Avg Latency")
+                .add_attribute(Attribute::Bold)
+                .fg(Color::Yellow)
+        ]));
+        
+        // Add data rows
         for (method, stats) in &metrics.per_method {
             let success_rate = if stats.requests_sent > 0 {
                 stats.requests_succeeded as f64 / stats.requests_sent as f64 * 100.0
@@ -350,17 +360,28 @@ impl EthHttpCli {
                 0.0
             };
 
-            println!(
-                "│ Method: {:<25} | Sent: {:<5} | ✅ {:<5} | ❌ {:<5} | Success: {:>6.2}% | Latency: {:>7.2}ms │",
-                method,
-                stats.requests_sent,
-                stats.requests_succeeded,
-                stats.requests_failed,
-                success_rate,
-                avg_latency
-            );
+            let color = if success_rate >= 95.0 {
+                Color::Green
+            } else if success_rate >= 80.0 {
+                Color::Yellow
+            } else {
+                Color::Red
+            };
+
+            table.add_row(Row::from(vec![
+                Cell::new(&format!(
+                    "{:<25} | {:>4} | {:>9} | {:>6} | {:>10.2}% | {:>9.2}ms",
+                    method,
+                    stats.requests_sent,
+                    stats.requests_succeeded,
+                    stats.requests_failed,
+                    success_rate,
+                    avg_latency
+                )).fg(color)
+            ]));
         }
-        println!("└─────────────────────────────────────────────────────────────────────────────────────────┘");
+        
+        println!("{}", table);
     }
 
     /// Reset metrics
