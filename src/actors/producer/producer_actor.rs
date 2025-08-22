@@ -146,7 +146,7 @@ impl Producer {
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
     ) -> Result<(), anyhow::Error> {
-        tracing::info!("Starting execution of plan: {}", plan.name());
+        tracing::debug!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
@@ -166,6 +166,7 @@ impl Producer {
         monitor_addr
             .send(RegisterPlan {
                 plan_id: plan_id.clone(),
+                plan_name: plan.name().to_string(),
             })
             .await
             .unwrap();
@@ -173,7 +174,7 @@ impl Producer {
         // Send all signed transactions to the consumer
         while let Ok(signed_txn) = iterator.iterator.recv() {
             while state.is_paused() {
-                tracing::info!("Producer is paused");
+                tracing::debug!("Producer is paused");
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             if let Err(e) = consumer_addr.send(signed_txn).await {
@@ -199,7 +200,7 @@ impl Producer {
             plan_id: plan_id.clone(),
         });
 
-        tracing::info!(
+        tracing::debug!(
             "All transactions for plan '{}' (id={}) ({} txns) have been sent to the consumer.",
             plan.name(),
             plan_id,
@@ -225,7 +226,7 @@ impl Actor for Producer {
         .into_actor(self)
         .wait(ctx);
         ctx.run_interval(Duration::from_secs(5), |act, _ctx| {
-            tracing::info!("Producer stats: plans_num={}, sending_txns={}, ready_accounts={}, success_plans_num={}, failed_plans_num={}, success_txns={}, failed_txns={}", act.stats.remain_plans_num, act.stats.sending_txns.load(Ordering::Relaxed), act.stats.ready_accounts.load(Ordering::Relaxed), act.stats.success_plans_num, act.stats.failed_plans_num, act.stats.success_txns, act.stats.failed_txns);
+            tracing::debug!("Producer stats: plans_num={}, sending_txns={}, ready_accounts={}, success_plans_num={}, failed_plans_num={}, success_txns={}, failed_txns={}", act.stats.remain_plans_num, act.stats.sending_txns.load(Ordering::Relaxed), act.stats.ready_accounts.load(Ordering::Relaxed), act.stats.success_plans_num, act.stats.failed_plans_num, act.stats.success_txns, act.stats.failed_txns);
         });
     }
 
@@ -313,7 +314,7 @@ impl Handler<RegisterTxnPlan> for Producer {
 
         self.stats.remain_plans_num += 1;
         let plan_id = msg.plan.id().clone();
-        tracing::info!(
+        tracing::debug!(
             "Registering new plan '{}' (id={}).",
             msg.plan.name(),
             plan_id
@@ -336,7 +337,7 @@ impl Handler<PlanCompleted> for Producer {
     type Result = ();
 
     fn handle(&mut self, msg: PlanCompleted, ctx: &mut Self::Context) {
-        tracing::info!(
+        tracing::debug!(
             "Plan '{}' completed successfully and retain {} plans.",
             msg.plan_id,
             self.plan_queue.len()
@@ -424,7 +425,9 @@ impl Handler<PauseProducer> for Producer {
     type Result = ();
 
     fn handle(&mut self, _msg: PauseProducer, _ctx: &mut Self::Context) {
-        tracing::info!("Producer paused. No new plans will be executed.");
+        if self.state.is_running() {
+            tracing::info!("Producer paused. No new plans will be executed because the mempool is full.");
+        }
         self.state.set_paused();
     }
 }
@@ -434,7 +437,9 @@ impl Handler<ResumeProducer> for Producer {
     type Result = ();
 
     fn handle(&mut self, _msg: ResumeProducer, ctx: &mut Self::Context) {
-        tracing::info!("Producer resumed.");
+        if self.state.is_paused() {
+            tracing::info!("Producer resumed.");
+        }
         self.state.set_running();
 
         // The producer is running again, so we attempt to trigger a plan if one is waiting.

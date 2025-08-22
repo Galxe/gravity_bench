@@ -188,9 +188,9 @@ async fn main() -> Result<()> {
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
-        .with_file(true)
-        .with_line_number(true)
-        .with_thread_ids(true)
+        .with_file(false)
+        .with_line_number(false)
+        .with_thread_ids(false)
         .init();
 
     let (contract_config, accounts) = if args.recover {
@@ -244,9 +244,11 @@ async fn main() -> Result<()> {
         benchmark_config.performance.max_pool_size,
     )
     .start();
+    
+    // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients
         .iter()
-        .map(|client| EthHttpCli::new(client.rpc().as_ref(), client.chain_id()).unwrap())
+        .map(|client| (**client).clone())  // Clone the actual EthHttpCli instead of creating new ones
         .collect();
 
     let consumer = Consumer::new_with_providers(

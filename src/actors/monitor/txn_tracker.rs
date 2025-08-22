@@ -1,10 +1,11 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use alloy::primitives::TxHash;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
+use comfy_table::{Table, Cell, presets::UTF8_FULL, Attribute, Color};
 
 use crate::actors::monitor::SubmissionResult;
 use crate::eth::EthHttpCli;
@@ -14,6 +15,20 @@ use super::UpdateSubmissionResult;
 
 const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
+const TPS_WINDOW: Duration = Duration::from_secs(17);
+
+/// Format large numbers with appropriate suffixes (K, M, B)
+fn format_large_number(num: u64) -> String {
+    if num >= 1_000_000_000 {
+        format!("{:.1}B", num as f64 / 1_000_000_000.0)
+    } else if num >= 1_000_000 {
+        format!("{:.1}M", num as f64 / 1_000_000.0)
+    } else if num >= 10_000 {
+        format!("{:.1}K", num as f64 / 1_000.0)
+    } else {
+        num.to_string()
+    }
+}
 
 /// Transaction and plan lifecycle tracker
 pub struct TxnTracker {
@@ -24,10 +39,17 @@ pub struct TxnTracker {
     pending_txns: BTreeSet<PendingTxInfo>,
     /// RPC client mapping
     clients: HashMap<String, Arc<EthHttpCli>>,
+    /// Timestamps of resolved transactions for TPS calculation
+    resolved_txn_timestamps: VecDeque<Instant>,
+    total_produced_transactions: u64,
+    total_resolved_transactions: u64,
+    total_failed_submissions: u64,
+    total_failed_executions: u64,
+    last_completed_plan: Option<(PlanId, PlanTracker)>,
 }
 
 /// Tracking status of a single transaction plan
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PlanTracker {
     /// Total number of transactions in the plan
     produce_transactions: usize,
@@ -41,6 +63,8 @@ struct PlanTracker {
     failed_executions: u64,
 
     plan_produced: bool,
+
+    plan_name: String,
 }
 
 /// Detailed information of in-flight transactions
@@ -100,12 +124,19 @@ impl TxnTracker {
             plan_trackers: HashMap::new(),
             pending_txns: BTreeSet::new(),
             clients: client_map,
+            resolved_txn_timestamps: VecDeque::new(),
+            total_produced_transactions: 0,
+            total_resolved_transactions: 0,
+            total_failed_submissions: 0,
+            total_failed_executions: 0,
+            last_completed_plan: None,
         }
     }
 
     pub fn handler_produce_txns(&mut self, plan_id: PlanId, count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.produce_transactions += count;
+            self.total_produced_transactions += count as u64;
         }
     }
 
@@ -116,8 +147,8 @@ impl TxnTracker {
     }
 
     /// Register new plan (no changes)
-    pub fn register_plan(&mut self, plan_id: PlanId) {
-        info!("Plan registered: plan_id={}", plan_id);
+    pub fn register_plan(&mut self, plan_id: PlanId, plan_name: String) {
+        debug!("Plan registered: plan_id={}", plan_id);
         let tracker = PlanTracker {
             produce_transactions: 0,
             resolved_transactions: 0,
@@ -125,6 +156,7 @@ impl TxnTracker {
             failed_submissions: 0,
             failed_executions: 0,
             plan_produced: false,
+            plan_name,
         };
         self.plan_trackers.insert(plan_id, tracker);
     }
@@ -177,6 +209,9 @@ impl TxnTracker {
                 if let Some(tracker) = self.plan_trackers.get_mut(plan_id) {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
+                    self.total_failed_submissions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             }
         }
@@ -185,8 +220,8 @@ impl TxnTracker {
     /// Check if plan is completed (no changes)
     pub fn check_plan_completion(&mut self, plan_id: &PlanId) -> PlanStatus {
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
-            info!("Plan {} status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
-                plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
+            debug!("Plan {}({}) status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
+                tracker.plan_name, plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
             if tracker.produce_transactions != 0
                 && tracker.resolved_transactions as usize >= tracker.produce_transactions
                 && tracker.plan_produced
@@ -197,13 +232,15 @@ impl TxnTracker {
                         "Plan failed: {} submission failures, {} execution failures",
                         tracker.failed_submissions, tracker.failed_executions
                     );
-                    info!("Plan {} failed: {}", plan_id, reason);
+                    warn!("Plan {} failed: {}", tracker.plan_name, reason);
                     PlanStatus::Failed { reason }
                 } else {
-                    info!("Plan {} completed successfully", plan_id);
+                    debug!("Plan {} completed successfully", plan_id);
                     PlanStatus::Completed
                 };
-                self.plan_trackers.remove(plan_id);
+                if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                    self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+                }
                 status
             } else {
                 PlanStatus::InProgress
@@ -342,6 +379,8 @@ impl TxnTracker {
                     self.plan_trackers.get_mut(&cleared_info.metadata.plan_id)
                 {
                     plan_tracker.resolved_transactions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             }
 
@@ -353,8 +392,11 @@ impl TxnTracker {
         for (info, receipt) in successful_txns {
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                 plan_tracker.resolved_transactions += 1;
+                self.resolved_txn_timestamps.push_back(Instant::now());
+                self.total_resolved_transactions += 1;
                 if !receipt.status() {
                     plan_tracker.failed_executions += 1;
+                    self.total_failed_executions += 1;
                     warn!(
                         "Transaction reverted: plan_id={}, tx_hash={:?}",
                         info.metadata.plan_id, info.tx_hash
@@ -374,6 +416,9 @@ impl TxnTracker {
                 if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                     plan_tracker.resolved_transactions += 1;
                     plan_tracker.failed_executions += 1;
+                    self.total_failed_executions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             } else {
                 // Not timed out, put back in main queue for next round check
@@ -386,18 +431,136 @@ impl TxnTracker {
         }
     }
 
-    /// Get statistics
-    pub fn get_stats(&self) -> TxnTrackerStats {
-        TxnTrackerStats {
-            active_plans: self.plan_trackers.len(),
-            pending_transactions: self.pending_txns.len(),
+    pub fn log_stats(&mut self) {
+        // Update TPS window by removing timestamps older than 30 seconds
+        let now = Instant::now();
+        let window_start = now - TPS_WINDOW;
+        while let Some(ts) = self.resolved_txn_timestamps.front() {
+            if *ts < window_start {
+                self.resolved_txn_timestamps.pop_front();
+            } else {
+                break;
+            }
         }
-    }
-}
 
-/// Transaction tracker statistics
-#[derive(Debug)]
-pub struct TxnTrackerStats {
-    pub active_plans: usize,
-    pub pending_transactions: usize,
+        // Calculate TPS
+        let tps = self.resolved_txn_timestamps.len() as f64 / TPS_WINDOW.as_secs_f64();
+
+        let mut plan_summaries = Vec::new();
+
+        if !self.plan_trackers.is_empty() {
+            for (_plan_id, tracker) in &self.plan_trackers {
+                plan_summaries.push(format!(
+                    "{}: {}/{}",
+                    tracker.plan_name,
+                    tracker.resolved_transactions,
+                    tracker.produce_transactions
+                ));
+            }
+        } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
+            plan_summaries.push(format!(
+                "{}: {}/{} done",
+                tracker.plan_name,
+                tracker.resolved_transactions,
+                tracker.produce_transactions
+            ));
+        }
+
+        // Calculate success rate
+        let success_rate = if self.total_produced_transactions > 0 {
+            self.total_resolved_transactions as f64 / self.total_produced_transactions as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        
+        // Set table header
+        table.set_header(vec![
+            "Plan Name",
+            "Progress", 
+            "Success%",
+            "SendFail",
+            "ExecFail",
+            "Status"
+        ]);
+        
+        // Add individual plan rows
+        if !self.plan_trackers.is_empty() {
+            for (_plan_id, tracker) in &self.plan_trackers {
+                let plan_success_rate = if tracker.resolved_transactions > 0 {
+                    let successful = tracker.resolved_transactions.saturating_sub(tracker.failed_submissions + tracker.failed_executions);
+                    successful as f64 / tracker.resolved_transactions as f64 * 100.0
+                } else if tracker.produce_transactions > 0 {
+                    // If no transactions resolved yet, can't calculate success rate
+                    0.0
+                } else {
+                    100.0
+                };
+                
+                let progress_color = if tracker.resolved_transactions as usize >= tracker.produce_transactions {
+                    Color::Green
+                } else {
+                    Color::Yellow
+                };
+                
+                let status = if tracker.plan_produced && tracker.resolved_transactions as usize >= tracker.produce_transactions {
+                    if tracker.failed_submissions + tracker.failed_executions > 0 {
+                        "Completed (w/ Errors)"
+                    } else {
+                        "Completed"
+                    }
+                } else {
+                    "In Progress"
+                };
+                
+                table.add_row(vec![
+                    Cell::new(&tracker.plan_name).fg(Color::Cyan),
+                    Cell::new(&format!("{}/{}", 
+                        format_large_number(tracker.resolved_transactions),
+                        format_large_number(tracker.produce_transactions as u64)
+                    )).fg(progress_color),
+                    Cell::new(&format!("{:.1}", plan_success_rate)).fg(if plan_success_rate >= 95.0 { Color::Green } else if plan_success_rate >= 80.0 { Color::Yellow } else { Color::Red }),
+                    Cell::new(&format_large_number(tracker.failed_submissions)).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
+                    Cell::new(&format_large_number(tracker.failed_executions)).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
+                    Cell::new(status).fg(if status.contains("Completed") { Color::Green } else { Color::Yellow }),
+                ]);
+            }
+        } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
+            let plan_success_rate = if tracker.resolved_transactions > 0 {
+                let successful = tracker.resolved_transactions.saturating_sub(tracker.failed_submissions + tracker.failed_executions);
+                successful as f64 / tracker.resolved_transactions as f64 * 100.0
+            } else {
+                100.0
+            };
+            
+            table.add_row(vec![
+                Cell::new(&format!("{} (Last)", tracker.plan_name)).fg(Color::DarkGrey),
+                Cell::new(&format!("{}/{}", 
+                    format_large_number(tracker.resolved_transactions),
+                    format_large_number(tracker.produce_transactions as u64)
+                )).fg(Color::Green),
+                Cell::new(&format!("{:.1}", plan_success_rate)).fg(Color::Green),
+                Cell::new(&format_large_number(tracker.failed_submissions)).fg(if tracker.failed_submissions > 0 { Color::Red } else { Color::Green }),
+                Cell::new(&format_large_number(tracker.failed_executions)).fg(if tracker.failed_executions > 0 { Color::Red } else { Color::Green }),
+                Cell::new("Done").fg(Color::Green),
+            ]);
+        }
+        
+        // Add summary row
+        table.add_row(vec![
+            Cell::new("TOTAL").add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{}/{}", 
+                format_large_number(self.total_resolved_transactions),
+                format_large_number(self.total_produced_transactions)
+            )).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}", success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(self.total_failed_submissions)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(self.total_failed_executions)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("TPS:{:.1}", tps)).add_attribute(Attribute::Bold).fg(Color::Magenta),
+        ]);
+        
+        println!("{}", table);
+    }
 }

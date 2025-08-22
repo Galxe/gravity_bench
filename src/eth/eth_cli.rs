@@ -9,18 +9,38 @@ use alloy::{
 use anyhow::{Context as AnyhowContext, Result};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, warn};
 use url::Url;
+use comfy_table::{Table, Cell, presets::UTF8_FULL, Attribute, Color};
+
+/// Format large numbers with appropriate suffixes (K, M, B)
+fn format_large_number(num: u64) -> String {
+    if num >= 1_000_000_000 {
+        format!("{:.1}B", num as f64 / 1_000_000_000.0)
+    } else if num >= 1_000_000 {
+        format!("{:.1}M", num as f64 / 1_000_000.0)
+    } else if num >= 10_000 {
+        format!("{:.1}K", num as f64 / 1_000.0)
+    } else {
+        num.to_string()
+    }
+}
 
 #[derive(Debug, Default, Clone)]
-pub struct ProviderMetrics {
+pub struct MethodMetrics {
     pub requests_sent: u64,
     pub requests_succeeded: u64,
     pub requests_failed: u64,
     pub total_latency_ms: u64,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ProviderMetrics {
+    pub per_method: HashMap<String, MethodMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +67,7 @@ where
 #[derive(Clone)]
 pub struct EthHttpCli {
     inner: Vec<Arc<RootProvider<Ethereum>>>,
+    #[allow(unused)]
     chain_id: u64,
     metrics: Arc<tokio::sync::Mutex<ProviderMetrics>>,
     retry_config: RetryConfig,
@@ -131,6 +152,7 @@ impl EthHttpCli {
         self.inner[0].clone()
     }
 
+    #[allow(unused)]
     pub fn chain_id(&self) -> u64 {
         self.chain_id
     }
@@ -155,7 +177,8 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| "Failed to verify connection to Ethereum node")
     }
@@ -168,7 +191,8 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[0].get_transaction_count(address).await })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_getTransactionCount", result.is_ok(), start.elapsed())
+            .await;
 
         result
             .with_context(|| format!("Failed to get transaction count for address: {:?}", address))
@@ -182,7 +206,8 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[0].get_balance(*address).await })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_getBalance", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| format!("Failed to get balance for address: {:?}", address))
     }
@@ -196,7 +221,8 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[0].get_gas_price().await })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_gasPrice", result.is_ok(), start.elapsed())
+            .await;
 
         result
             .map_err(|e| anyhow::anyhow!("Failed to get gas price: {:?}", e))
@@ -216,7 +242,8 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("txpool_status", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| "Failed to get mempool status")
     }
@@ -230,7 +257,8 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[0].get_block_number().await })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| "Failed to get block number")
     }
@@ -282,19 +310,24 @@ impl EthHttpCli {
     }
 
     /// Update performance metrics
-    async fn update_metrics(&self, success: bool, latency: Duration) {
+    async fn update_metrics(&self, method: &str, success: bool, latency: Duration) {
         let mut metrics = self.metrics.lock().await;
-        metrics.requests_sent += 1;
+        let method_metrics = metrics
+            .per_method
+            .entry(method.to_string())
+            .or_default();
+
+        method_metrics.requests_sent += 1;
 
         if success {
-            metrics.requests_succeeded += 1;
+            method_metrics.requests_succeeded += 1;
         } else {
-            metrics.requests_failed += 1;
+            method_metrics.requests_failed += 1;
         }
 
         // Ensure at least 1ms latency is recorded to avoid 0 latency in very fast environments
         let latency_ms = std::cmp::max(1, latency.as_millis() as u64);
-        metrics.total_latency_ms += latency_ms;
+        method_metrics.total_latency_ms += latency_ms;
     }
 
     /// Get a copy of performance metrics
@@ -303,26 +336,85 @@ impl EthHttpCli {
         self.metrics.lock().await.clone()
     }
 
-    /// Get average latency (milliseconds)
+    /// Log performance metrics
     #[allow(unused)]
-    pub async fn get_average_latency_ms(&self) -> f64 {
-        let metrics = self.metrics.lock().await;
-        if metrics.requests_sent > 0 {
-            metrics.total_latency_ms as f64 / metrics.requests_sent as f64
-        } else {
-            0.0
+    pub async fn log_metrics_summary(&self) {
+        let metrics = self.get_metrics().await;
+        if metrics.per_method.is_empty() {
+            println!("RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
+            return;
         }
-    }
 
-    /// Get success rate
-    #[allow(unused)]
-    pub async fn get_success_rate(&self) -> f64 {
-        let metrics = self.metrics.lock().await;
-        if metrics.requests_sent > 0 {
-            metrics.requests_succeeded as f64 / metrics.requests_sent as f64
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL);
+        
+        // Set proper column headers for RPC metrics
+        table.set_header(vec![
+            "RPC Method",
+            "Sent", 
+            "Succeeded",
+            "Failed",
+            "Success Rate",
+            "Avg Latency"
+        ]);
+        
+        // Add data rows
+        for (method, stats) in &metrics.per_method {
+            let success_rate = if stats.requests_sent > 0 {
+                stats.requests_succeeded as f64 / stats.requests_sent as f64 * 100.0
+            } else {
+                0.0
+            };
+            let avg_latency = if stats.requests_sent > 0 {
+                stats.total_latency_ms as f64 / stats.requests_sent as f64
+            } else {
+                0.0
+            };
+
+            let color = if success_rate >= 95.0 {
+                Color::Green
+            } else if success_rate >= 80.0 {
+                Color::Yellow
+            } else {
+                Color::Red
+            };
+
+            table.add_row(vec![
+                Cell::new(method).fg(Color::Cyan),
+                Cell::new(&format_large_number(stats.requests_sent)).fg(Color::White),
+                Cell::new(&format_large_number(stats.requests_succeeded)).fg(Color::Green),
+                Cell::new(&format_large_number(stats.requests_failed)).fg(if stats.requests_failed > 0 { Color::Red } else { Color::Green }),
+                Cell::new(&format!("{:.1}%", success_rate)).fg(color),
+                Cell::new(&format!("{:.1}ms", avg_latency)).fg(if avg_latency > 100.0 { Color::Yellow } else { Color::Green }),
+            ]);
+        }
+        
+        // Add summary row for RPC metrics
+        let total_sent: u64 = metrics.per_method.values().map(|m| m.requests_sent).sum();
+        let total_succeeded: u64 = metrics.per_method.values().map(|m| m.requests_succeeded).sum();
+        let total_failed: u64 = metrics.per_method.values().map(|m| m.requests_failed).sum();
+        let overall_success_rate = if total_sent > 0 {
+            total_succeeded as f64 / total_sent as f64 * 100.0
         } else {
             0.0
-        }
+        };
+        let overall_avg_latency = if total_sent > 0 {
+            let total_latency: u64 = metrics.per_method.values().map(|m| m.total_latency_ms).sum();
+            total_latency as f64 / total_sent as f64
+        } else {
+            0.0
+        };
+        
+        table.add_row(vec![
+            Cell::new("TOTAL").add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_sent)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_succeeded)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format_large_number(total_failed)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}%", overall_success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
+            Cell::new(&format!("{:.1}ms", overall_avg_latency)).add_attribute(Attribute::Bold).fg(Color::Magenta),
+        ]);
+        
+        println!("{}", table);
     }
 
     /// Reset metrics
@@ -335,11 +427,28 @@ impl EthHttpCli {
 
     pub async fn send_raw_tx(&self, tx_bytes: Vec<u8>) -> Result<TxHash> {
         let idx = rand::thread_rng().gen_range(0..self.inner.len());
-        tokio::time::timeout(Duration::from_secs(10), async {
+        let start = Instant::now();
+        let op = async {
             let pending_tx = self.inner[idx].send_raw_transaction(&tx_bytes).await?;
-            Ok(*pending_tx.tx_hash())
-        })
-        .await?
+            anyhow::Ok(pending_tx.tx_hash().clone())
+        };
+
+        let result = tokio::time::timeout(Duration::from_secs(10), op).await;
+
+        let final_result = match result {
+            Ok(Ok(hash)) => Ok(hash.clone()),
+            Ok(Err(e)) => Err(anyhow::Error::from(e)),
+            Err(e) => Err(anyhow::Error::from(e)),
+        };
+
+        self.update_metrics(
+            "eth_sendRawTransaction",
+            final_result.is_ok(),
+            start.elapsed(),
+        )
+        .await;
+
+        final_result
     }
 
     /// Send signed transaction envelope
@@ -360,7 +469,8 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_sendRawTransaction", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| "Failed to send transaction envelope")
     }
@@ -376,7 +486,8 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[idx].get_transaction_receipt(tx_hash).await })
             .await;
 
-        self.update_metrics(result.is_ok(), start.elapsed()).await;
+        self.update_metrics("eth_getTransactionReceipt", result.is_ok(), start.elapsed())
+            .await;
 
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
     }
