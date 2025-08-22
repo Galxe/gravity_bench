@@ -448,6 +448,7 @@ impl Actor for Consumer {
         });
 
         let rate_limiter = self.rate_limiter.clone();
+        let dispatcher = self.dispatcher.clone();
         ctx.run_interval(Duration::from_secs(5), move |act, _ctx| {
             let (current_tokens, bucket_capacity) = rate_limiter.get_status();
             debug!(
@@ -460,7 +461,13 @@ impl Actor for Consumer {
                 act.stats.pool_size.load(Ordering::Relaxed),
                 current_tokens,
                 bucket_capacity,
-            )
+            );
+            let providers = dispatcher.get_providers();
+            actix::spawn(async move {
+                for p in providers {
+                    p.log_metrics_summary().await;
+                }
+            });
         });
 
         let tps_info = if self.rate_limiter.max_tps == 0 {
