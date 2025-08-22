@@ -431,7 +431,7 @@ impl TxnTracker {
         let summary_str = plan_summaries.join(", ");
 
         info!(
-            "Txn Stats: [{}], Overall: {}/{}, TPS (30s window): {:.2}",
+            "Txn Stats: [{}], Overall: {}/{}, TPS: {:.2}",
             summary_str, total_resolved, total_produced, tps
         );
     }
