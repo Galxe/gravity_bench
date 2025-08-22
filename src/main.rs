@@ -10,6 +10,7 @@ use std::{
     process::{Command, Output},
     str::FromStr,
     sync::Arc,
+    time::{Duration, Instant},
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
@@ -121,6 +122,7 @@ async fn test_uniswap(
     contract_config: ContractConfig,
     producer: &Addr<Producer>,
     tps: usize,
+    duration_secs: u64,
 ) -> Result<()> {
     let mut rx_vec = Vec::new();
     for token in contract_config.get_all_token_addresses() {
@@ -136,7 +138,15 @@ async fn test_uniswap(
     for rx in rx_vec {
         rx.await??;
     }
+    let start_time = Instant::now();
     loop {
+        if duration_secs > 0 && start_time.elapsed() >= Duration::from_secs(duration_secs) {
+            info!(
+                "Benchmark duration of {} seconds reached. Stopping.",
+                duration_secs
+            );
+            break;
+        }
         let plan = PlanBuilder::swap_token_to_token(
             chain_id,
             U256::from(1000),
@@ -148,6 +158,7 @@ async fn test_uniswap(
         let _rx = run_plan(plan, producer).await?;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
+    Ok(())
 }
 
 async fn test_erc20_transfer(
@@ -156,8 +167,17 @@ async fn test_erc20_transfer(
     contract_config: ContractConfig,
     producer: &Addr<Producer>,
     tps: usize,
+    duration_secs: u64,
 ) -> Result<()> {
+    let start_time = Instant::now();
     loop {
+        if duration_secs > 0 && start_time.elapsed() >= Duration::from_secs(duration_secs) {
+            info!(
+                "Benchmark duration of {} seconds reached. Stopping.",
+                duration_secs
+            );
+            break;
+        }
         // bench erc20 transfer
         let erc20_transfer = PlanBuilder::erc20_transfer(
             chain_id,
@@ -169,6 +189,7 @@ async fn test_erc20_transfer(
         let _rx = run_plan(erc20_transfer, producer).await?;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
+    Ok(())
 }
 
 fn run_command(command: &str) -> Result<Output> {
@@ -355,12 +376,29 @@ async fn main() -> Result<()> {
     }
 
     let tps = benchmark_config.target_tps as usize;
+    let duration_secs = benchmark_config.performance.duration_secs;
     if benchmark_config.enable_swap_token {
         info!("bench uniswap");
-        test_uniswap(account_addresses, chain_id, contract_config, &producer, tps).await?;
+        test_uniswap(
+            account_addresses,
+            chain_id,
+            contract_config,
+            &producer,
+            tps,
+            duration_secs,
+        )
+        .await?;
     } else {
         info!("bench erc20 transfer");
-        test_erc20_transfer(account_addresses, chain_id, contract_config, &producer, tps).await?;
+        test_erc20_transfer(
+            account_addresses,
+            chain_id,
+            contract_config,
+            &producer,
+            tps,
+            duration_secs,
+        )
+        .await?;
     }
     Ok(())
 }
