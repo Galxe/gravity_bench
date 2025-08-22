@@ -244,9 +244,11 @@ async fn main() -> Result<()> {
         benchmark_config.performance.max_pool_size,
     )
     .start();
+    
+    // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients
         .iter()
-        .map(|client| EthHttpCli::new(client.rpc().as_ref(), client.chain_id()).unwrap())
+        .map(|client| (**client).clone())  // Clone the actual EthHttpCli instead of creating new ones
         .collect();
 
     let consumer = Consumer::new_with_providers(

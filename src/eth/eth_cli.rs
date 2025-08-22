@@ -54,6 +54,7 @@ where
 #[derive(Clone)]
 pub struct EthHttpCli {
     inner: Vec<Arc<RootProvider<Ethereum>>>,
+    #[allow(unused)]
     chain_id: u64,
     metrics: Arc<tokio::sync::Mutex<ProviderMetrics>>,
     retry_config: RetryConfig,
@@ -138,6 +139,7 @@ impl EthHttpCli {
         self.inner[0].clone()
     }
 
+    #[allow(unused)]
     pub fn chain_id(&self) -> u64 {
         self.chain_id
     }
