@@ -450,7 +450,7 @@ impl Actor for Consumer {
         let rate_limiter = self.rate_limiter.clone();
         ctx.run_interval(Duration::from_secs(5), move |act, _ctx| {
             let (current_tokens, bucket_capacity) = rate_limiter.get_status();
-            info!(
+            debug!(
                 "Consumer Stats: recv: {}, sending: {}, sent: {}, rejected: {}, rate_limited: {}, pool_size: {}, rate_limiter: {}/{}",
                 act.stats.transactions_recv,
                 act.stats.transactions_sending.load(Ordering::Relaxed),

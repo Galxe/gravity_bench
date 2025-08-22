@@ -337,7 +337,7 @@ impl Handler<PlanCompleted> for Producer {
     type Result = ();
 
     fn handle(&mut self, msg: PlanCompleted, ctx: &mut Self::Context) {
-        tracing::info!(
+        tracing::debug!(
             "Plan '{}' completed successfully and retain {} plans.",
             msg.plan_id,
             self.plan_queue.len()
