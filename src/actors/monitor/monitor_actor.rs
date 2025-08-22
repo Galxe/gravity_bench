@@ -58,11 +58,11 @@ impl Monitor {
         if let Some(producer_addr) = &self.producer_addr {
             match status {
                 PlanStatus::Completed => {
-                    info!("Plan {} completed successfully", plan_id);
+                    tracing::debug!("Plan {} completed successfully", plan_id);
                     producer_addr.do_send(PlanCompleted { plan_id });
                 }
                 PlanStatus::Failed { reason } => {
-                    info!("Plan {} failed: {}", plan_id, reason);
+                    tracing::debug!("Plan {} failed: {}", plan_id, reason);
                     producer_addr.do_send(PlanFailed { plan_id, reason });
                 }
                 PlanStatus::InProgress => {

@@ -205,10 +205,10 @@ impl TxnTracker {
                         "Plan failed: {} submission failures, {} execution failures",
                         tracker.failed_submissions, tracker.failed_executions
                     );
-                    info!("Plan {} failed: {}", plan_id, reason);
+                    warn!("Plan {} failed: {}", tracker.plan_name, reason);
                     PlanStatus::Failed { reason }
                 } else {
-                    info!("Plan {} completed successfully", plan_id);
+                    debug!("Plan {} completed successfully", plan_id);
                     PlanStatus::Completed
                 };
                 self.plan_trackers.remove(plan_id);
@@ -414,23 +414,25 @@ impl TxnTracker {
 
         let mut total_produced = 0;
         let mut total_resolved = 0;
-        for tracker in self.plan_trackers.values() {
+        let mut plan_summaries = Vec::new();
+
+        for (plan_id, tracker) in &self.plan_trackers {
             total_produced += tracker.produce_transactions;
             total_resolved += tracker.resolved_transactions;
+            plan_summaries.push(format!(
+                "{}({}): {}/{}",
+                tracker.plan_name,
+                plan_id,
+                tracker.resolved_transactions,
+                tracker.produce_transactions
+            ));
         }
 
-        info!("--- TxnTracker Stats ---");
-        for (plan_id, tracker) in &self.plan_trackers {
-            info!(
-                "{}({}): {}/{}",
-                tracker.plan_name, plan_id, tracker.resolved_transactions, tracker.produce_transactions
-            );
-        }
+        let summary_str = plan_summaries.join(", ");
 
         info!(
-            "Overall progress: {}/{}. TPS (30s window): {:.2}",
-            total_resolved, total_produced, tps
+            "Txn Stats: [{}], Overall: {}/{}, TPS (30s window): {:.2}",
+            summary_str, total_resolved, total_produced, tps
         );
-        info!("--- End TxnTracker Stats ---");
     }
 }

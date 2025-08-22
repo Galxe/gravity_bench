@@ -425,7 +425,7 @@ impl Handler<PauseProducer> for Producer {
     type Result = ();
 
     fn handle(&mut self, _msg: PauseProducer, _ctx: &mut Self::Context) {
-        tracing::info!("Producer paused. No new plans will be executed.");
+        tracing::debug!("Producer paused. No new plans will be executed.");
         self.state.set_paused();
     }
 }
@@ -435,7 +435,7 @@ impl Handler<ResumeProducer> for Producer {
     type Result = ();
 
     fn handle(&mut self, _msg: ResumeProducer, ctx: &mut Self::Context) {
-        tracing::info!("Producer resumed.");
+        tracing::debug!("Producer resumed.");
         self.state.set_running();
 
         // The producer is running again, so we attempt to trigger a plan if one is waiting.
