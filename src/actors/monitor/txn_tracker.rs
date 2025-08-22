@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,6 +14,7 @@ use super::UpdateSubmissionResult;
 
 const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
+const TPS_WINDOW: Duration = Duration::from_secs(30);
 
 /// Transaction and plan lifecycle tracker
 pub struct TxnTracker {
@@ -24,6 +25,8 @@ pub struct TxnTracker {
     pending_txns: BTreeSet<PendingTxInfo>,
     /// RPC client mapping
     clients: HashMap<String, Arc<EthHttpCli>>,
+    /// Timestamps of resolved transactions for TPS calculation
+    resolved_txn_timestamps: VecDeque<Instant>,
 }
 
 /// Tracking status of a single transaction plan
@@ -41,6 +44,8 @@ struct PlanTracker {
     failed_executions: u64,
 
     plan_produced: bool,
+
+    plan_name: String,
 }
 
 /// Detailed information of in-flight transactions
@@ -100,6 +105,7 @@ impl TxnTracker {
             plan_trackers: HashMap::new(),
             pending_txns: BTreeSet::new(),
             clients: client_map,
+            resolved_txn_timestamps: VecDeque::new(),
         }
     }
 
@@ -116,8 +122,8 @@ impl TxnTracker {
     }
 
     /// Register new plan (no changes)
-    pub fn register_plan(&mut self, plan_id: PlanId) {
-        info!("Plan registered: plan_id={}", plan_id);
+    pub fn register_plan(&mut self, plan_id: PlanId, plan_name: String) {
+        debug!("Plan registered: plan_id={}", plan_id);
         let tracker = PlanTracker {
             produce_transactions: 0,
             resolved_transactions: 0,
@@ -125,6 +131,7 @@ impl TxnTracker {
             failed_submissions: 0,
             failed_executions: 0,
             plan_produced: false,
+            plan_name,
         };
         self.plan_trackers.insert(plan_id, tracker);
     }
@@ -177,6 +184,7 @@ impl TxnTracker {
                 if let Some(tracker) = self.plan_trackers.get_mut(plan_id) {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
                 }
             }
         }
@@ -185,8 +193,8 @@ impl TxnTracker {
     /// Check if plan is completed (no changes)
     pub fn check_plan_completion(&mut self, plan_id: &PlanId) -> PlanStatus {
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
-            info!("Plan {} status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
-                plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
+            debug!("Plan {}({}) status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
+                tracker.plan_name, plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
             if tracker.produce_transactions != 0
                 && tracker.resolved_transactions as usize >= tracker.produce_transactions
                 && tracker.plan_produced
@@ -342,6 +350,7 @@ impl TxnTracker {
                     self.plan_trackers.get_mut(&cleared_info.metadata.plan_id)
                 {
                     plan_tracker.resolved_transactions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
                 }
             }
 
@@ -353,6 +362,7 @@ impl TxnTracker {
         for (info, receipt) in successful_txns {
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                 plan_tracker.resolved_transactions += 1;
+                self.resolved_txn_timestamps.push_back(Instant::now());
                 if !receipt.status() {
                     plan_tracker.failed_executions += 1;
                     warn!(
@@ -374,6 +384,7 @@ impl TxnTracker {
                 if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                     plan_tracker.resolved_transactions += 1;
                     plan_tracker.failed_executions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
                 }
             } else {
                 // Not timed out, put back in main queue for next round check
@@ -386,18 +397,40 @@ impl TxnTracker {
         }
     }
 
-    /// Get statistics
-    pub fn get_stats(&self) -> TxnTrackerStats {
-        TxnTrackerStats {
-            active_plans: self.plan_trackers.len(),
-            pending_transactions: self.pending_txns.len(),
+    pub fn log_stats(&mut self) {
+        // Update TPS window by removing timestamps older than 30 seconds
+        let now = Instant::now();
+        let window_start = now - TPS_WINDOW;
+        while let Some(ts) = self.resolved_txn_timestamps.front() {
+            if *ts < window_start {
+                self.resolved_txn_timestamps.pop_front();
+            } else {
+                break;
+            }
         }
-    }
-}
 
-/// Transaction tracker statistics
-#[derive(Debug)]
-pub struct TxnTrackerStats {
-    pub active_plans: usize,
-    pub pending_transactions: usize,
+        // Calculate TPS
+        let tps = self.resolved_txn_timestamps.len() as f64 / TPS_WINDOW.as_secs_f64();
+
+        let mut total_produced = 0;
+        let mut total_resolved = 0;
+        for tracker in self.plan_trackers.values() {
+            total_produced += tracker.produce_transactions;
+            total_resolved += tracker.resolved_transactions;
+        }
+
+        info!("--- TxnTracker Stats ---");
+        for (plan_id, tracker) in &self.plan_trackers {
+            info!(
+                "{}({}): {}/{}",
+                tracker.plan_name, plan_id, tracker.resolved_transactions, tracker.produce_transactions
+            );
+        }
+
+        info!(
+            "Overall progress: {}/{}. TPS (30s window): {:.2}",
+            total_resolved, total_produced, tps
+        );
+        info!("--- End TxnTracker Stats ---");
+    }
 }

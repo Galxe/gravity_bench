@@ -18,6 +18,10 @@ use super::{
     UpdateSubmissionResult,
 };
 
+#[derive(Message)]
+#[rtype(result = "()")]
+struct LogStats;
+
 /// Monitor Actor - Core for system state tracking and fault tolerance
 pub struct Monitor {
     /// Registered Producer address
@@ -73,15 +77,14 @@ impl Actor for Monitor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        let stats = self.txn_tracker.get_stats();
-        info!(
-            "Monitor started with {} active plans, {} pending transactions",
-            stats.active_plans, stats.pending_transactions
-        );
+        info!("Monitor started");
 
         // Set up periodic Tick messages
         ctx.run_interval(Duration::from_secs(1), |_, ctx| {
             ctx.address().do_send(Tick);
+        });
+        ctx.run_interval(Duration::from_secs(10), |_, ctx| {
+            ctx.address().do_send(LogStats);
         });
         ctx.run_interval(Duration::from_secs(1), |act, ctx| {
             let client_clone = act.clients.clone();
@@ -128,7 +131,7 @@ impl Handler<RegisterPlan> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: RegisterPlan, _ctx: &mut Self::Context) {
-        self.txn_tracker.register_plan(msg.plan_id);
+        self.txn_tracker.register_plan(msg.plan_id, msg.plan_name);
     }
 }
 
@@ -167,6 +170,14 @@ impl Handler<Tick> for Monitor {
             let status = self.txn_tracker.check_plan_completion(&plan_id);
             self.notify_plan_status(plan_id, status);
         }
+    }
+}
+
+impl Handler<LogStats> for Monitor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: LogStats, _ctx: &mut Self::Context) {
+        self.txn_tracker.log_stats();
     }
 }
 

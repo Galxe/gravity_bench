@@ -26,6 +26,7 @@ pub struct RegisterConsumer {
 #[rtype(result = "()")]
 pub struct RegisterPlan {
     pub plan_id: PlanId,
+    pub plan_name: String,
 }
 
 #[derive(Debug)]

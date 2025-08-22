@@ -166,6 +166,7 @@ impl Producer {
         monitor_addr
             .send(RegisterPlan {
                 plan_id: plan_id.clone(),
+                plan_name: plan.name().to_string(),
             })
             .await
             .unwrap();
@@ -199,7 +200,7 @@ impl Producer {
             plan_id: plan_id.clone(),
         });
 
-        tracing::info!(
+        tracing::debug!(
             "All transactions for plan '{}' (id={}) ({} txns) have been sent to the consumer.",
             plan.name(),
             plan_id,
