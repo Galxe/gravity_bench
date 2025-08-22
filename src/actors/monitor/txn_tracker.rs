@@ -435,20 +435,18 @@ impl TxnTracker {
         let mut plan_summaries = Vec::new();
 
         if !self.plan_trackers.is_empty() {
-            for (plan_id, tracker) in &self.plan_trackers {
+            for (_plan_id, tracker) in &self.plan_trackers {
                 plan_summaries.push(format!(
-                    "{}({}): {}/{}",
+                    "{}: {}/{}",
                     tracker.plan_name,
-                    plan_id,
                     tracker.resolved_transactions,
                     tracker.produce_transactions
                 ));
             }
-        } else if let Some((plan_id, tracker)) = &self.last_completed_plan {
+        } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
             plan_summaries.push(format!(
-                "Last Completed - {}({}): {}/{}",
+                "{}: {}/{} done",
                 tracker.plan_name,
-                plan_id,
                 tracker.resolved_transactions,
                 tracker.produce_transactions
             ));
