@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use alloy::primitives::TxHash;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use crate::actors::monitor::SubmissionResult;
 use crate::eth::EthHttpCli;
@@ -454,14 +454,30 @@ impl TxnTracker {
 
         let summary_str = plan_summaries.join(", ");
 
-        info!(
-            "Txn Stats: [{}], Overall: {}/{}, Fails (sub/exec): {}/{}, TPS: {:.2}",
-            summary_str,
-            self.total_resolved_transactions,
-            self.total_produced_transactions,
-            self.total_failed_submissions,
-            self.total_failed_executions,
-            tps
-        );
+        // Calculate success rate
+        let success_rate = if self.total_produced_transactions > 0 {
+            self.total_resolved_transactions as f64 / self.total_produced_transactions as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        println!("┌────────────────────────────────────────────────────────────────────────────────────┐");
+        if !summary_str.is_empty() {
+            println!("│ 📊 Transaction Statistics                                Plans: {:<30} │", summary_str);
+        } else {
+            println!("│ 📊 Transaction Statistics                                                          │");
+        }
+        println!("├────────────────────────────────────────────────────────────────────────────────────┤");
+        println!("│ 🚀 Produced: {:<8} │ ✅ Resolved: {:<8} │ 📈 Success Rate: {:>6.2}% │ ⚡ TPS: {:>6.2} │", 
+                 self.total_produced_transactions,
+                 self.total_resolved_transactions, 
+                 success_rate,
+                 tps);
+        if self.total_failed_submissions > 0 || self.total_failed_executions > 0 {
+            println!("│ ❌ Submission Fails: {:<5} │ 💥 Execution Fails: {:<5}                            │",
+                     self.total_failed_submissions,
+                     self.total_failed_executions);
+        }
+        println!("└────────────────────────────────────────────────────────────────────────────────────┘");
     }
 }

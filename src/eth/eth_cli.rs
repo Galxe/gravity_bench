@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use url::Url;
 
 #[derive(Debug, Default, Clone)]
@@ -325,11 +325,13 @@ impl EthHttpCli {
     pub async fn log_metrics_summary(&self) {
         let metrics = self.get_metrics().await;
         if metrics.per_method.is_empty() {
-            info!("RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
+            println!("🌐 RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
             return;
         }
 
-        info!("--- RPC Metrics Summary for [{}] ---", self.rpc);
+        println!("┌─────────────────────────────────────────────────────────────────────────────────────────┐");
+        println!("│                           🌐 RPC Metrics Summary for [{}]                           │", self.rpc);
+        println!("├─────────────────────────────────────────────────────────────────────────────────────────┤");
         for (method, stats) in &metrics.per_method {
             let success_rate = if stats.requests_sent > 0 {
                 stats.requests_succeeded as f64 / stats.requests_sent as f64 * 100.0
@@ -342,8 +344,8 @@ impl EthHttpCli {
                 0.0
             };
 
-            info!(
-                "  \n - Method: {:<25} | Sent: {:<5} | Succeeded: {:<5} | Failed: {:<5} | Success: {:>6.2}% | Avg Latency: {:>8.2} ms \n",
+            println!(
+                "│ Method: {:<25} | Sent: {:<5} | ✅ {:<5} | ❌ {:<5} | Success: {:>6.2}% | Latency: {:>8.2}ms │",
                 method,
                 stats.requests_sent,
                 stats.requests_succeeded,
@@ -352,7 +354,7 @@ impl EthHttpCli {
                 avg_latency
             );
         }
-        info!("-----------------------------------------");
+        println!("└─────────────────────────────────────────────────────────────────────────────────────────┘");
     }
 
     /// Reset metrics
