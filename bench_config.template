@@ -4,14 +4,14 @@
 contract_config_path = "deploy.json"
 target_tps = 10000
 nodes = [
-    { rpc_url = "http://localhost:8545", chain_id = 7771625 },
+    { rpc_url = "http://localhost:8545", chain_id = 1337 },
 ]
 num_tokens=2
 enable_swap_token = false
 # Faucet and deployer account configuration
 [faucet]
-# Private key (example, please replace with real private key)
-private_key = "xxxxx"
+# Private key (example, please replace with real private key, the follows is a example of reth)
+private_key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 # Faucet Level: Controls the depth of cascading faucet levels
 # Value 10: Enables cascade mode with progression 1 -> 10 -> 100 (amplification chain)
 # Value 0: Disables cascading, processes data directly
