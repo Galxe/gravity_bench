@@ -481,7 +481,7 @@ impl TxnTracker {
             "Plan Name",
             "Progress", 
             "Success%",
-            "SubFail",
+            "SendFail",
             "ExecFail",
             "Status"
         ]);
