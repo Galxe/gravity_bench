@@ -14,7 +14,7 @@ use super::UpdateSubmissionResult;
 
 const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
-const TPS_WINDOW: Duration = Duration::from_secs(30);
+const TPS_WINDOW: Duration = Duration::from_secs(17);
 
 /// Transaction and plan lifecycle tracker
 pub struct TxnTracker {
@@ -27,10 +27,15 @@ pub struct TxnTracker {
     clients: HashMap<String, Arc<EthHttpCli>>,
     /// Timestamps of resolved transactions for TPS calculation
     resolved_txn_timestamps: VecDeque<Instant>,
+    total_produced_transactions: u64,
+    total_resolved_transactions: u64,
+    total_failed_submissions: u64,
+    total_failed_executions: u64,
+    last_completed_plan: Option<(PlanId, PlanTracker)>,
 }
 
 /// Tracking status of a single transaction plan
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PlanTracker {
     /// Total number of transactions in the plan
     produce_transactions: usize,
@@ -106,12 +111,18 @@ impl TxnTracker {
             pending_txns: BTreeSet::new(),
             clients: client_map,
             resolved_txn_timestamps: VecDeque::new(),
+            total_produced_transactions: 0,
+            total_resolved_transactions: 0,
+            total_failed_submissions: 0,
+            total_failed_executions: 0,
+            last_completed_plan: None,
         }
     }
 
     pub fn handler_produce_txns(&mut self, plan_id: PlanId, count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.produce_transactions += count;
+            self.total_produced_transactions += count as u64;
         }
     }
 
@@ -184,7 +195,9 @@ impl TxnTracker {
                 if let Some(tracker) = self.plan_trackers.get_mut(plan_id) {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
+                    self.total_failed_submissions += 1;
                     self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             }
         }
@@ -211,7 +224,9 @@ impl TxnTracker {
                     debug!("Plan {} completed successfully", plan_id);
                     PlanStatus::Completed
                 };
-                self.plan_trackers.remove(plan_id);
+                if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                    self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+                }
                 status
             } else {
                 PlanStatus::InProgress
@@ -351,6 +366,7 @@ impl TxnTracker {
                 {
                     plan_tracker.resolved_transactions += 1;
                     self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             }
 
@@ -363,8 +379,10 @@ impl TxnTracker {
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                 plan_tracker.resolved_transactions += 1;
                 self.resolved_txn_timestamps.push_back(Instant::now());
+                self.total_resolved_transactions += 1;
                 if !receipt.status() {
                     plan_tracker.failed_executions += 1;
+                    self.total_failed_executions += 1;
                     warn!(
                         "Transaction reverted: plan_id={}, tx_hash={:?}",
                         info.metadata.plan_id, info.tx_hash
@@ -384,7 +402,9 @@ impl TxnTracker {
                 if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                     plan_tracker.resolved_transactions += 1;
                     plan_tracker.failed_executions += 1;
+                    self.total_failed_executions += 1;
                     self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
                 }
             } else {
                 // Not timed out, put back in main queue for next round check
@@ -412,15 +432,21 @@ impl TxnTracker {
         // Calculate TPS
         let tps = self.resolved_txn_timestamps.len() as f64 / TPS_WINDOW.as_secs_f64();
 
-        let mut total_produced = 0;
-        let mut total_resolved = 0;
         let mut plan_summaries = Vec::new();
 
-        for (plan_id, tracker) in &self.plan_trackers {
-            total_produced += tracker.produce_transactions;
-            total_resolved += tracker.resolved_transactions;
+        if !self.plan_trackers.is_empty() {
+            for (plan_id, tracker) in &self.plan_trackers {
+                plan_summaries.push(format!(
+                    "{}({}): {}/{}",
+                    tracker.plan_name,
+                    plan_id,
+                    tracker.resolved_transactions,
+                    tracker.produce_transactions
+                ));
+            }
+        } else if let Some((plan_id, tracker)) = &self.last_completed_plan {
             plan_summaries.push(format!(
-                "{}({}): {}/{}",
+                "Last Completed - {}({}): {}/{}",
                 tracker.plan_name,
                 plan_id,
                 tracker.resolved_transactions,
@@ -431,8 +457,13 @@ impl TxnTracker {
         let summary_str = plan_summaries.join(", ");
 
         info!(
-            "Txn Stats: [{}], Overall: {}/{}, TPS: {:.2}",
-            summary_str, total_resolved, total_produced, tps
+            "Txn Stats: [{}], Overall: {}/{}, Fails (sub/exec): {}/{}, TPS: {:.2}",
+            summary_str,
+            self.total_resolved_transactions,
+            self.total_produced_transactions,
+            self.total_failed_submissions,
+            self.total_failed_executions,
+            tps
         );
     }
 }

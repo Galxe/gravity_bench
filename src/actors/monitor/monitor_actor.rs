@@ -83,7 +83,7 @@ impl Actor for Monitor {
         ctx.run_interval(Duration::from_secs(1), |_, ctx| {
             ctx.address().do_send(Tick);
         });
-        ctx.run_interval(Duration::from_secs(1), |_, ctx| {
+        ctx.run_interval(Duration::from_millis(1700), |_, ctx| {
             ctx.address().do_send(LogStats);
         });
         ctx.run_interval(Duration::from_secs(1), |act, ctx| {
