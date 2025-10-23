@@ -41,6 +41,8 @@ pub struct TxnTracker {
     clients: HashMap<String, Arc<EthHttpCli>>,
     /// Timestamps of resolved transactions for TPS calculation
     resolved_txn_timestamps: VecDeque<Instant>,
+    /// Latency of resolved transactions
+    latencies: VecDeque<Duration>,
     total_produced_transactions: u64,
     total_resolved_transactions: u64,
     total_failed_submissions: u64,
@@ -125,6 +127,7 @@ impl TxnTracker {
             pending_txns: BTreeSet::new(),
             clients: client_map,
             resolved_txn_timestamps: VecDeque::new(),
+            latencies: VecDeque::new(),
             total_produced_transactions: 0,
             total_resolved_transactions: 0,
             total_failed_submissions: 0,
@@ -375,6 +378,13 @@ impl TxnTracker {
                 if successful_txns_hash.contains(&cleared_info.tx_hash) {
                     continue;
                 }
+
+                let latency = cleared_info.submit_time.elapsed();
+                self.latencies.push_back(latency);
+                if self.latencies.len() > 1000 {
+                    self.latencies.pop_front();
+                }
+
                 if let Some(plan_tracker) =
                     self.plan_trackers.get_mut(&cleared_info.metadata.plan_id)
                 {
@@ -390,6 +400,12 @@ impl TxnTracker {
 
         // 3. Process the confirmed transactions from this sampling
         for (info, receipt) in successful_txns {
+            let latency = info.submit_time.elapsed();
+            self.latencies.push_back(latency);
+            if self.latencies.len() > 1000 {
+                self.latencies.pop_front();
+            }
+
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                 plan_tracker.resolved_transactions += 1;
                 self.resolved_txn_timestamps.push_back(Instant::now());
@@ -445,6 +461,21 @@ impl TxnTracker {
 
         // Calculate TPS
         let tps = self.resolved_txn_timestamps.len() as f64 / TPS_WINDOW.as_secs_f64();
+
+        // Calculate latency stats
+        let (avg_latency, min_latency, max_latency) = if !self.latencies.is_empty() {
+            let sum: Duration = self.latencies.iter().sum();
+            let avg = sum / self.latencies.len() as u32;
+            let min = *self.latencies.iter().min().unwrap();
+            let max = *self.latencies.iter().max().unwrap();
+            (avg, min, max)
+        } else {
+            (
+                Duration::from_secs(0),
+                Duration::from_secs(0),
+                Duration::from_secs(0),
+            )
+        };
 
         let mut plan_summaries = Vec::new();
 
@@ -558,7 +589,15 @@ impl TxnTracker {
             Cell::new(&format!("{:.1}", success_rate)).add_attribute(Attribute::Bold).fg(Color::Blue),
             Cell::new(&format_large_number(self.total_failed_submissions)).add_attribute(Attribute::Bold).fg(Color::Blue),
             Cell::new(&format_large_number(self.total_failed_executions)).add_attribute(Attribute::Bold).fg(Color::Blue),
-            Cell::new(&format!("TPS:{:.1}", tps)).add_attribute(Attribute::Bold).fg(Color::Magenta),
+            Cell::new(&format!(
+                "TPS:{:.1} | Latency(avg/min/max): {:.1}s/{:.1}s/{:.1}s",
+                tps,
+                avg_latency.as_secs_f64(),
+                min_latency.as_secs_f64(),
+                max_latency.as_secs_f64()
+            ))
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Magenta),
         ]);
         
         println!("{}", table);

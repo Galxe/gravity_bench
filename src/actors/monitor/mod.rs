@@ -5,7 +5,7 @@ mod txn_tracker;
 
 use actix::Message;
 use alloy::primitives::TxHash;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use crate::txn_plan::{PlanId, TxnMetadata};
 
@@ -42,6 +42,7 @@ pub struct UpdateSubmissionResult {
     pub metadata: Arc<TxnMetadata>,
     pub result: Arc<SubmissionResult>,
     pub rpc_url: String,
+    pub send_time: Instant,
 }
 
 #[derive(Message)]
