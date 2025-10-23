@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseFuture};
@@ -231,6 +231,7 @@ impl Consumer {
                         metadata,
                         result: Arc::new(SubmissionResult::Success(tx_hash)),
                         rpc_url,
+                        send_time: Instant::now(),
                     });
 
                     // Update statistics and return early
@@ -254,6 +255,7 @@ impl Consumer {
                             metadata,
                             result: Arc::new(SubmissionResult::Success(tx_hash)),
                             rpc_url: url,
+                            send_time: Instant::now(),
                         });
 
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -286,6 +288,7 @@ impl Consumer {
                                         keccak256(&signed_txn.bytes),
                                     ))),
                                     rpc_url: url,
+                                    send_time: Instant::now(),
                                 });
                             }
                         } else {
@@ -294,6 +297,7 @@ impl Consumer {
                                 metadata,
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),
                                 rpc_url: "unknown".to_string(),
+                                send_time: Instant::now(),
                             });
                         }
                         // After encountering Nonce error, should stop retrying and return regardless
@@ -323,6 +327,7 @@ impl Consumer {
             metadata,
             result: Arc::new(SubmissionResult::ErrorWithRetry), // Mark as needing upstream retry
             rpc_url: "unknown".to_string(),
+            send_time: Instant::now(),
         });
 
         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -408,7 +413,8 @@ impl Consumer {
                                         metadata: signed_txn.metadata,
                                         result: Arc::new(SubmissionResult::ErrorWithRetry),
                                         rpc_url: "unknown".to_string(),
-                                    });
+                                        send_time: Instant::now(),
+                                        });
                                     break;
                                 }
                             };
