@@ -235,11 +235,12 @@ async fn main() -> Result<()> {
         }
         let res = run_command(&command).unwrap();
         info!("{}", String::from_utf8_lossy(&res.stdout));
-        let contract_config =
-            ContractConfig::load_from_file(&benchmark_config.contract_config_path)
-                .unwrap_or_else(|e| {
-                    panic!("Contract config file not found {}", e);
-                });
+        let contract_config = ContractConfig::load_from_file(
+            &benchmark_config.contract_config_path,
+        )
+        .unwrap_or_else(|e| {
+            panic!("Contract config file not found {}", e);
+        });
         let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
         (contract_config, accounts)
     };
@@ -265,11 +266,11 @@ async fn main() -> Result<()> {
         benchmark_config.performance.max_pool_size,
     )
     .start();
-    
+
     // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients
         .iter()
-        .map(|client| (**client).clone())  // Clone the actual EthHttpCli instead of creating new ones
+        .map(|client| (**client).clone()) // Clone the actual EthHttpCli instead of creating new ones
         .collect();
 
     let consumer = Consumer::new_with_providers(

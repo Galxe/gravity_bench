@@ -426,7 +426,9 @@ impl Handler<PauseProducer> for Producer {
 
     fn handle(&mut self, _msg: PauseProducer, _ctx: &mut Self::Context) {
         if self.state.is_running() {
-            tracing::info!("Producer paused. No new plans will be executed because the mempool is full.");
+            tracing::info!(
+                "Producer paused. No new plans will be executed because the mempool is full."
+            );
         }
         self.state.set_paused();
     }
