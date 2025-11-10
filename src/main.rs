@@ -5,6 +5,7 @@ use alloy::{
 };
 use anyhow::Result;
 use clap::Parser;
+use futures::future::join_all;
 use std::{
     collections::HashMap,
     process::{Command, Output},
@@ -12,7 +13,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
@@ -24,15 +24,12 @@ use crate::{
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
     },
-    util::gen_account::gen_account,
+    util::account_generator::AccountGenerator,
 };
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, default_value_t = false)]
-    recover: bool,
-
     #[arg(long, default_value = "bench_config.toml")]
     config: String,
 }
@@ -46,27 +43,6 @@ mod config;
 // mod engine;
 mod eth;
 mod txn_plan;
-
-async fn load_accounts_from_file(
-    path: &str,
-) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
-    let file = tokio::fs::File::open(path).await?;
-    let reader = TokioBufReader::new(file);
-    let mut lines = reader.lines();
-    let mut accounts = HashMap::new();
-
-    while let Some(line) = lines.next_line().await? {
-        let parts: Vec<&str> = line.split(", ").collect();
-        if parts.len() == 2 {
-            let signer = PrivateKeySigner::from_str(parts[1])?;
-            let address = signer.address();
-            accounts.insert(Arc::new(address), Arc::new(signer));
-        } else {
-            return Err(anyhow::anyhow!("Invalid line in accounts file: {}", line));
-        }
-    }
-    Ok(accounts)
-}
 
 async fn run_plan(
     plan: Box<dyn TxnPlan>,
@@ -214,36 +190,30 @@ async fn main() -> Result<()> {
         .with_thread_ids(false)
         .init();
 
-    let (contract_config, accounts) = if args.recover {
-        info!("Starting in recovery mode...");
-        let contract_config =
-            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        let accounts = load_accounts_from_file("accounts.txt").await?;
-        info!("Loaded {} accounts from accounts.txt", accounts.len());
-        (contract_config, accounts)
-    } else {
-        info!("Starting in normal mode...");
-        let mut command = format!(
-            "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
-            benchmark_config.faucet.private_key,
-            benchmark_config.num_tokens,
-            benchmark_config.contract_config_path,
-            benchmark_config.nodes[0].rpc_url
-        );
-        if benchmark_config.enable_swap_token {
-            command.push_str(" --enable-swap-token");
-        }
-        let res = run_command(&command).unwrap();
-        info!("{}", String::from_utf8_lossy(&res.stdout));
-        let contract_config = ContractConfig::load_from_file(
-            &benchmark_config.contract_config_path,
-        )
-        .unwrap_or_else(|e| {
+    let mut generator = AccountGenerator::new();
+
+    info!("Starting contract deployment and account generation...");
+    let mut command = format!(
+        "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
+        benchmark_config.faucet.private_key,
+        benchmark_config.num_tokens,
+        benchmark_config.contract_config_path,
+        benchmark_config.nodes[0].rpc_url
+    );
+    if benchmark_config.enable_swap_token {
+        command.push_str(" --enable-swap-token");
+    }
+    let res = run_command(&command).unwrap();
+    info!("{}", String::from_utf8_lossy(&res.stdout));
+
+    let contract_config =
+        ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap_or_else(|e| {
             panic!("Contract config file not found {}", e);
         });
-        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
-        (contract_config, accounts)
-    };
+
+    let accounts = generator
+        .gen(benchmark_config.accounts.num_accounts)
+        .unwrap();
 
     let account_addresses = Arc::new(
         accounts
@@ -281,7 +251,9 @@ async fn main() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let nonce_map = init_nonce(&accounts, eth_clients[0].clone(), args.recover).await;
+
+    info!("Initializing nonces for {} accounts...", accounts.len());
+    let nonce_map = init_nonce(&accounts, eth_clients[0].clone()).await;
     let producer = Producer::new(accounts.clone(), nonce_map, consumer, monitor)
         .unwrap()
         .start();
@@ -306,7 +278,7 @@ async fn main() -> Result<()> {
             * U256::from(21000)
             * U256::from(1000_000_000_000u64),
         eth_clients[0].clone(),
-        args.recover,
+        &mut generator,
     )
     .await?;
     execute_faucet_distribution(
@@ -339,7 +311,7 @@ async fn main() -> Result<()> {
             Arc::new(Erc20FaucetTxnBuilder::new(*token)),
             U256::ZERO,
             eth_clients[0].clone(),
-            args.recover,
+            &mut generator,
         )
         .await?;
 
@@ -351,23 +323,6 @@ async fn main() -> Result<()> {
             benchmark_config.faucet.wait_duration_secs,
         )
         .await?;
-    }
-
-    // Only write accounts file in normal mode after faucet distribution is complete
-    if !args.recover {
-        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-        for account in accounts.iter() {
-            file.write_all(
-                format!(
-                    "{}, {}\n",
-                    account.0.to_string(),
-                    hex::encode(account.1.to_bytes())
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        }
     }
 
     let tps = benchmark_config.target_tps as usize;
@@ -401,21 +356,18 @@ async fn main() -> Result<()> {
 async fn init_nonce(
     accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
     eth_client: Arc<EthHttpCli>,
-    recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
-    let mut nonce_map = HashMap::with_capacity(accounts.len());
-    if recover {
-        for account in accounts.iter() {
-            let nonce = eth_client
-                .get_transaction_count(*account.0.clone())
+    let nonce_futs = accounts.keys().map(|account| {
+        let client = eth_client.clone();
+        async move {
+            let nonce = client
+                .get_transaction_count(*account.clone())
                 .await
                 .unwrap();
-            nonce_map.insert(account.0.clone(), nonce as u32);
+            (account.clone(), nonce as u32)
         }
-    } else {
-        for account in accounts.iter() {
-            nonce_map.insert(account.0.clone(), 0);
-        }
-    }
-    nonce_map
+    });
+
+    let results = join_all(nonce_futs).await;
+    results.into_iter().collect()
 }

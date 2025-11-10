@@ -7,28 +7,6 @@ use alloy::{
 use anyhow::{Context, Result};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Deterministically generate n Ethereum accounts
-///
-/// # Arguments
-///
-/// * `n` - Number of accounts to generate
-///
-/// # Returns
-///
-/// * `Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>>` - Map of generated accounts
-///
-/// # Examples
-///
-/// ```
-/// let accounts = gen_account(5).unwrap();
-/// for (address, signer) in accounts {
-///     println!("Address: {}, Private Key: {}", address, hex::encode(signer.to_bytes()));
-/// }
-/// ```
-pub fn gen_account(n: usize) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
-    gen_account_with_offset(n, 0)
-}
-
 /// Deterministically generate n Ethereum accounts with a seed offset.
 ///
 /// # Arguments
@@ -39,7 +17,7 @@ pub fn gen_account(n: usize) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigne
 /// # Returns
 ///
 /// * `Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>>` - Map of generated accounts
-pub fn gen_account_with_offset(
+pub(crate) fn gen_account_with_offset(
     n: usize,
     seed_offset: u64,
 ) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {

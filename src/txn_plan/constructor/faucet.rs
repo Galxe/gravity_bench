@@ -3,12 +3,13 @@ use crate::{
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
-    util::gen_account,
+    util::{account_generator::AccountGenerator},
 };
 use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
+use futures::future;
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -45,7 +46,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         txn_builder: Arc<T>,
         remained_eth: U256,
         eth_client: Arc<EthHttpCli>,
-        recover: bool,
+        generator: &mut AccountGenerator,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -112,13 +113,9 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let mut account_levels = vec![];
         if total_levels > 1 {
             let num_intermediate_levels = total_levels - 1;
-            let mut seed_offset: u64 = 0;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let accounts =
-                    gen_account::gen_account_with_offset(num_accounts_at_level, seed_offset)
-                        .unwrap();
-                seed_offset += num_accounts_at_level as u64;
+                let accounts = generator.gen(num_accounts_at_level).unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }
@@ -136,15 +133,26 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
                 .entry(faucet_address)
                 .or_insert_with(|| Arc::new(AtomicU64::new(faucet_nonce)));
 
-            for level in &account_levels {
-                for acc in level {
-                    let nonce = if recover {
-                        eth_client.get_transaction_count(acc.address()).await.unwrap()
-                    } else {
-                        0
-                    };
+            let all_intermediate_accounts: Vec<_> =
+                account_levels.iter().flatten().cloned().collect();
+
+            if !all_intermediate_accounts.is_empty() {
+                info!(
+                    "Concurrently fetching nonces for {} intermediate accounts...",
+                    all_intermediate_accounts.len()
+                );
+                let nonce_futs = all_intermediate_accounts.iter().map(|acc| {
+                    let client = eth_client.clone();
+                    let address = acc.address();
+                    async move {
+                        let nonce = client.get_transaction_count(address).await.unwrap();
+                        (address, nonce)
+                    }
+                });
+                let nonce_results = future::join_all(nonce_futs).await;
+                for (address, nonce) in nonce_results {
                     nonce_map
-                        .entry(acc.address())
+                        .entry(address)
                         .or_insert_with(|| Arc::new(AtomicU64::new(nonce)));
                 }
             }

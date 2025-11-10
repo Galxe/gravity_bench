@@ -18,6 +18,7 @@ use crate::{
         traits::PlanExecutionMode,
         TxnPlan,
     },
+    util::account_generator::AccountGenerator,
 };
 
 /// Plan builder - Provides convenient APIs to create various types of transaction plans
@@ -84,7 +85,7 @@ impl PlanBuilder {
         txn_builder: Arc<T>,
         remained_eth: U256,
         eth_client: Arc<EthHttpCli>,
-        recover: bool,
+        generator: &mut AccountGenerator,
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
@@ -95,7 +96,7 @@ impl PlanBuilder {
             txn_builder,
             remained_eth,
             eth_client,
-            recover,
+            generator,
         )
         .await;
         Ok(Arc::new(constructor))
