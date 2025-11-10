@@ -1,4 +1,5 @@
 use crate::{
+    eth::EthHttpCli,
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
@@ -35,14 +36,16 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
 }
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
         faucet_balance: U256,
         faucet_level: usize,
         faucet: PrivateKeySigner,
-        start_nonce: u64,
         final_recipients: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
+        eth_client: Arc<EthHttpCli>,
+        recover: bool,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -112,11 +115,10 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let mut seed_offset: u64 = 0;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let seeds: Vec<u64> = (0..num_accounts_at_level as u64)
-                    .map(|i| seed_offset + i)
-                    .collect();
+                let accounts =
+                    gen_account::gen_account_with_offset(num_accounts_at_level, seed_offset)
+                        .unwrap();
                 seed_offset += num_accounts_at_level as u64;
-                let accounts = gen_account::gen_deterministic_accounts(&seeds).unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }
@@ -124,15 +126,26 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let nonce_map_arc = NONCE_MAP.get_or_init(|| Arc::new(Mutex::new(HashMap::new())));
         {
             let mut nonce_map = nonce_map_arc.lock().unwrap();
+
+            let faucet_address = faucet.address();
+            let faucet_nonce = eth_client
+                .get_transaction_count(faucet_address)
+                .await
+                .unwrap();
             nonce_map
-                .entry(faucet.address())
-                .or_insert_with(|| Arc::new(AtomicU64::new(start_nonce)));
+                .entry(faucet_address)
+                .or_insert_with(|| Arc::new(AtomicU64::new(faucet_nonce)));
 
             for level in &account_levels {
                 for acc in level {
+                    let nonce = if recover {
+                        eth_client.get_transaction_count(acc.address()).await.unwrap()
+                    } else {
+                        0
+                    };
                     nonce_map
                         .entry(acc.address())
-                        .or_insert_with(|| Arc::new(AtomicU64::new(0)));
+                        .or_insert_with(|| Arc::new(AtomicU64::new(nonce)));
                 }
             }
         }

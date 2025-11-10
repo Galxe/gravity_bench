@@ -287,83 +287,77 @@ async fn main() -> Result<()> {
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    if !args.recover {
-        let faucet_address =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-        let faucet_start_nonce = eth_clients[0]
-            .get_transaction_count(faucet_address.address())
-            .await
-            .unwrap();
-        let faucet_balance = eth_clients[0]
-            .get_balance(&faucet_address.address())
+    // Faucet distribution: always run this, the builder will handle recovery internally
+    let faucet_signer =
+        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+    let faucet_balance = eth_clients[0]
+        .get_balance(&faucet_signer.address())
+        .await
+        .unwrap();
+
+    info!("Initializing ETH Faucet distribution...");
+    let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+        benchmark_config.faucet.faucet_level as usize,
+        faucet_balance,
+        &benchmark_config.faucet.private_key,
+        account_addresses.clone(),
+        Arc::new(EthFaucetTxnBuilder),
+        U256::from(benchmark_config.num_tokens)
+            * U256::from(21000)
+            * U256::from(1000_000_000_000u64),
+        eth_clients[0].clone(),
+        args.recover,
+    )
+    .await?;
+    execute_faucet_distribution(
+        eth_faucet_builder,
+        chain_id,
+        &producer,
+        "ETH",
+        benchmark_config.faucet.wait_duration_secs,
+    )
+    .await?;
+
+    let all_token_addresses = contract_config.get_all_token_addresses();
+
+    for token in &all_token_addresses {
+        info!("distributing token: {}", token);
+
+        let balance = IERC20::new(*token, eth_clients[0].provider())
+            .balanceOf(faucet_signer.address())
+            .call()
             .await
             .unwrap();
 
-        info!("Initializing Faucet constructor...");
-        let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+        info!("balance of token: {}", balance);
+
+        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            faucet_balance,
+            balance,
             &benchmark_config.faucet.private_key,
-            faucet_start_nonce,
             account_addresses.clone(),
-            Arc::new(EthFaucetTxnBuilder),
-            U256::from(benchmark_config.num_tokens)
-                * U256::from(21000)
-                * U256::from(1000_000_000_000u64),
-        )
-        .unwrap();
-        execute_faucet_distribution(
-            eth_faucet_builder,
-            chain_id,
-            &producer,
-            "ETH",
-            benchmark_config.faucet.wait_duration_secs,
+            Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+            U256::ZERO,
+            eth_clients[0].clone(),
+            args.recover,
         )
         .await?;
 
-        let all_token_addresses = contract_config.get_all_token_addresses();
-        let faucet_signer_for_token =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+        execute_faucet_distribution(
+            token_faucet_builder,
+            chain_id,
+            &producer,
+            &format!("Token {}", token),
+            benchmark_config.faucet.wait_duration_secs,
+        )
+        .await?;
+    }
 
-        for token in &all_token_addresses {
-            info!("distributing token: {}", token);
-
-            let faucet_current_nonce = eth_clients[0]
-                .get_transaction_count(faucet_signer_for_token.address())
-                .await
-                .unwrap();
-            let balance = IERC20::new(*token, eth_clients[0].provider())
-                .balanceOf(faucet_signer_for_token.address())
-                .call()
-                .await
-                .unwrap();
-
-            info!("balance of token: {}", balance);
-
-            let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-                benchmark_config.faucet.faucet_level as usize,
-                balance,
-                &benchmark_config.faucet.private_key,
-                faucet_current_nonce,
-                account_addresses.clone(),
-                Arc::new(Erc20FaucetTxnBuilder::new(*token)),
-                U256::ZERO,
-            )
-            .unwrap();
-
-            execute_faucet_distribution(
-                token_faucet_builder,
-                chain_id,
-                &producer,
-                &format!("Token {}", token),
-                benchmark_config.faucet.wait_duration_secs,
-            )
-            .await?;
-        }
-
+    // Only write accounts file in normal mode after faucet distribution is complete
+    if !args.recover {
         let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
         for account in accounts.iter() {
-            file.write(
+            file.write_all(
                 format!(
                     "{}, {}\n",
                     account.0.to_string(),

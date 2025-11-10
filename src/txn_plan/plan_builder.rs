@@ -7,6 +7,7 @@ use alloy::{
 
 use crate::{
     config::LiquidityPair,
+    eth::EthHttpCli,
     txn_plan::{
         constructor::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
@@ -75,25 +76,28 @@ impl PlanBuilder {
     }
 
     /// Create ETH distribution plan
-    pub fn create_faucet_tree_plan_builder<T: FaucetTxnBuilder + 'static>(
+    pub async fn create_faucet_tree_plan_builder<T: FaucetTxnBuilder + 'static>(
         faucet_level: usize,
         faucet_account_balance: U256,
         faucet_private_key: &str,
-        faucet_start_nonce: u64,
         total_accounts: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
+        eth_client: Arc<EthHttpCli>,
+        recover: bool,
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
             faucet_account_balance,
             faucet_level,
             faucet_signer,
-            faucet_start_nonce,
             total_accounts,
             txn_builder,
             remained_eth,
-        );
+            eth_client,
+            recover,
+        )
+        .await;
         Ok(Arc::new(constructor))
     }
 
