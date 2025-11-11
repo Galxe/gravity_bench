@@ -297,10 +297,7 @@ async fn main() -> Result<()> {
     let client_clone = eth_clients[0].clone();
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
-        Arc::new(move |address| {
-            let client_clone2 = client_clone.clone();
-            Box::pin(async move { client_clone2.get_balance(&address).await })
-        }),
+        benchmark_config.faucet.fauce_eth_balance,
         &benchmark_config.faucet.private_key,
         faucet_start_nonce,
         account_addresses.clone(),
@@ -344,16 +341,7 @@ async fn main() -> Result<()> {
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
             
-            Arc::new(move |address| {
-                let client_clone2 = client_clone.clone();
-                Box::pin(async move {
-                    IERC20::new(token_clone, client_clone2.provider())
-                        .balanceOf(address)
-                        .call()
-                        .await
-                        .map_err(anyhow::Error::from)
-                })
-            }),
+            ,
             &benchmark_config.faucet.private_key,
             faucet_current_nonce,
             account_addresses.clone(),

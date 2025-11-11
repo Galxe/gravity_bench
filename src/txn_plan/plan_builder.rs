@@ -71,7 +71,7 @@ impl PlanBuilder {
     /// Create ETH distribution plan
     pub async fn create_faucet_tree_plan_builder<T: FaucetTxnBuilder + 'static>(
         faucet_level: usize,
-        eth_client: BalanceFetcher,
+        faucet_balance: U256,
         faucet_private_key: &str,
         faucet_start_nonce: u64,
         total_accounts: Arc<Vec<Arc<Address>>>,
@@ -81,7 +81,7 @@ impl PlanBuilder {
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
-            eth_client,
+            faucet_balance,
             faucet_level,
             faucet_signer,
             faucet_start_nonce,

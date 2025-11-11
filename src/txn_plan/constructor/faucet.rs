@@ -35,7 +35,7 @@ pub type BalanceFetcher = Arc<dyn Fn(Address) -> Pin<Box<dyn Future<Output = Res
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub async fn new(
-        balance_fetcher: BalanceFetcher,
+        faucet_balance: U256,
         faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
