@@ -31,10 +31,10 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     _phantom: PhantomData<T>,
 }
 
-type BalanceFetcher = Arc<dyn Fn(&Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>> + Send + Sync>;
+pub type BalanceFetcher = Arc<dyn Fn(Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>> + Send + Sync>;
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
-    pub fn new(
+    pub async fn new(
         balance_fetcher: BalanceFetcher,
         faucet_level: usize,
         faucet: PrivateKeySigner,

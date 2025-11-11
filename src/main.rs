@@ -294,9 +294,13 @@ async fn main() -> Result<()> {
         .await
         .unwrap();
     info!("Initializing Faucet constructor...");
+    let client_clone = eth_clients[0].clone();
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
-        eth_clients[0].clone(),
+        Arc::new(move |address| {
+            let client_clone2 = client_clone.clone();
+            Box::pin(async move { client_clone2.get_balance(&address).await })
+        }),
         &benchmark_config.faucet.private_key,
         faucet_start_nonce,
         account_addresses.clone(),
@@ -306,6 +310,7 @@ async fn main() -> Result<()> {
             * U256::from(1000_000_000_000u64),
         &mut accout_generator,
     )
+    .await
     .unwrap();
     execute_faucet_distribution(
         eth_faucet_builder,
@@ -334,10 +339,21 @@ async fn main() -> Result<()> {
             .unwrap_or(U256::ZERO);
 
         info!("balance of token: {}", balance);
-
+        let client_clone = eth_clients[0].clone();
+        let token_clone = token.clone();
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            eth_clients[0].clone(),
+            
+            Arc::new(move |address| {
+                let client_clone2 = client_clone.clone();
+                Box::pin(async move {
+                    IERC20::new(token_clone, client_clone2.provider())
+                        .balanceOf(address)
+                        .call()
+                        .await
+                        .map_err(anyhow::Error::from)
+                })
+            }),
             &benchmark_config.faucet.private_key,
             faucet_current_nonce,
             account_addresses.clone(),
@@ -345,6 +361,7 @@ async fn main() -> Result<()> {
             U256::ZERO,
             &mut accout_generator,
         )
+        .await
         .unwrap();
 
         execute_faucet_distribution(
