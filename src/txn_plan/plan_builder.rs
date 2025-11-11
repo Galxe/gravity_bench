@@ -6,17 +6,12 @@ use alloy::{
 };
 
 use crate::{
-    config::LiquidityPair,
-    txn_plan::{
-        constructor::{
+    config::LiquidityPair, eth::EthHttpCli, txn_plan::{
+        TxnPlan, constructor::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
             SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
-        },
-        faucet_txn_builder::FaucetTxnBuilder,
-        plan::ManyToOnePlan,
-        traits::PlanExecutionMode,
-        TxnPlan,
-    },
+        }, faucet_txn_builder::FaucetTxnBuilder, plan::ManyToOnePlan, traits::PlanExecutionMode
+    }
 };
 
 /// Plan builder - Provides convenient APIs to create various types of transaction plans
@@ -77,7 +72,7 @@ impl PlanBuilder {
     /// Create ETH distribution plan
     pub fn create_faucet_tree_plan_builder<T: FaucetTxnBuilder + 'static>(
         faucet_level: usize,
-        faucet_account_balance: U256,
+        eth_client: Arc<EthHttpCli>,
         faucet_private_key: &str,
         faucet_start_nonce: u64,
         total_accounts: Arc<Vec<Arc<Address>>>,
@@ -87,7 +82,7 @@ impl PlanBuilder {
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(
-            faucet_account_balance,
+            eth_client,
             faucet_level,
             faucet_signer,
             faucet_start_nonce,

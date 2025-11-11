@@ -293,15 +293,10 @@ async fn main() -> Result<()> {
         .get_transaction_count(faucet_address.address())
         .await
         .unwrap();
-    let faucet_balance = eth_clients[0]
-        .get_balance(&faucet_address.address())
-        .await
-        .unwrap();
-
     info!("Initializing Faucet constructor...");
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
-        faucet_balance,
+        eth_clients[0].clone(),
         &benchmark_config.faucet.private_key,
         faucet_start_nonce,
         account_addresses.clone(),
@@ -336,13 +331,13 @@ async fn main() -> Result<()> {
             .balanceOf(faucet_signer_for_token.address())
             .call()
             .await
-            .unwrap();
+            .unwrap_or(U256::ZERO);
 
         info!("balance of token: {}", balance);
 
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            balance,
+            eth_clients[0].clone(),
             &benchmark_config.faucet.private_key,
             faucet_current_nonce,
             account_addresses.clone(),

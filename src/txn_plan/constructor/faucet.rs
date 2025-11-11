@@ -1,8 +1,7 @@
 use crate::{
-    txn_plan::{
+    eth::EthHttpCli, txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
-    },
-    util::gen_account,
+    }, util::gen_account
 };
 use alloy::{
     primitives::{Address, U256},
@@ -36,7 +35,7 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub fn new(
-        faucet_balance: U256,
+        eth_client: Arc<EthHttpCli>,
         faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
