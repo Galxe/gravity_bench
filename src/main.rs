@@ -289,17 +289,12 @@ async fn main() -> Result<()> {
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-    let faucet_start_nonce = eth_clients[0]
-        .get_transaction_count(faucet_address.address())
-        .await
-        .unwrap();
     info!("Initializing Faucet constructor...");
-    let client_clone = eth_clients[0].clone();
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
         benchmark_config.faucet.fauce_eth_balance,
         &benchmark_config.faucet.private_key,
-        faucet_start_nonce,
+        1,
         account_addresses.clone(),
         Arc::new(EthFaucetTxnBuilder),
         U256::from(benchmark_config.num_tokens)
@@ -318,34 +313,25 @@ async fn main() -> Result<()> {
     )
     .await?;
 
-    let all_token_addresses = contract_config.get_all_token_addresses();
+    let tokens = contract_config.get_all_token();
     let faucet_signer_for_token =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
-    for token in &all_token_addresses {
-        info!("distributing token: {}", token);
-
-        let faucet_current_nonce = eth_clients[0]
-            .get_transaction_count(faucet_signer_for_token.address())
-            .await
-            .unwrap();
-        let balance = IERC20::new(*token, eth_clients[0].provider())
-            .balanceOf(faucet_signer_for_token.address())
-            .call()
-            .await
-            .unwrap_or(U256::ZERO);
-
-        info!("balance of token: {}", balance);
+    for token in &tokens {
+        info!("distributing token: {}", token.address);
+        let token_address = Address::from_str(&token.address).unwrap();
+        let faucet_token_address = Address::from_str(&token.faucet_address).unwrap();
+        let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
+        info!("balance of token: {}", faucet_token_balance);
         let client_clone = eth_clients[0].clone();
         let token_clone = token.clone();
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            
-            ,
+            faucet_token_balance,
             &benchmark_config.faucet.private_key,
-            faucet_current_nonce,
+            0,
             account_addresses.clone(),
-            Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+            Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
             U256::ZERO,
             &mut accout_generator,
         )
@@ -356,7 +342,7 @@ async fn main() -> Result<()> {
             token_faucet_builder,
             chain_id,
             &producer,
-            &format!("Token {}", token),
+            &format!("Token {}", token.symbol),
             benchmark_config.faucet.wait_duration_secs,
         )
         .await?;

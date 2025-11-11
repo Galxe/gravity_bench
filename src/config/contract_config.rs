@@ -36,6 +36,10 @@ pub struct Token {
     #[allow(unused)]
     pub symbol: String,
     pub address: String,
+    #[serde(rename = "faucet_address")]
+    pub faucet_address: String,
+    #[serde(rename = "faucet_balance")]
+    pub faucet_balance: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -111,6 +115,14 @@ impl ContractConfig {
     }
 
     /// Get all token addresses
+    pub fn get_all_token(&self) -> Vec<Token> {
+        self.addresses
+            .tokens
+            .iter()
+            .map(|token| token.clone())
+            .collect()
+    }
+
     pub fn get_all_token_addresses(&self) -> Vec<Address> {
         self.addresses
             .tokens

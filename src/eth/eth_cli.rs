@@ -1,5 +1,5 @@
 use alloy::{
-    consensus::TxEnvelope,
+    consensus::{Account, TxEnvelope},
     eips::Encodable2718,
     network::Ethereum,
     primitives::{Address, TxHash, U256},
@@ -517,5 +517,10 @@ impl EthHttpCli {
             .await;
 
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
+    }
+
+    pub async fn get_account(&self, address: Address) -> Result<Account> {
+        self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
+            .await
     }
 }

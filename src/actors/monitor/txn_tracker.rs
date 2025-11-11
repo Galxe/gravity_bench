@@ -3,7 +3,9 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use alloy::consensus::Account;
 use alloy::primitives::TxHash;
+use alloy::rpc::types::TransactionReceipt;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
 use tracing::{debug, error, warn};
 
@@ -264,6 +266,7 @@ impl TxnTracker {
         impl std::future::Future<
             Output = (
                 PendingTxInfo,
+                Result<Account, anyhow::Error>,
                 Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
             ),
         >,
@@ -303,11 +306,12 @@ impl TxnTracker {
 
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
+                    let account = client.get_account(*task_info.metadata.from_account.as_ref()).await;
                     debug!(
                         "checked tx_hash={:?} result={:?}",
                         task_info.tx_hash, result
                     );
-                    (task_info, result)
+                    (task_info, account, result)
                 };
                 tasks.push(task);
             } else {
@@ -322,6 +326,7 @@ impl TxnTracker {
         &mut self,
         results: Vec<(
             PendingTxInfo,
+            Result<Account, anyhow::Error>,
             Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
         )>,
     ) {
@@ -329,16 +334,22 @@ impl TxnTracker {
         let mut failed_txns = Vec::new(); // Including Pending, Timeout, Error
 
         // 1. Categorize results
-        for (info, result) in results {
+        for (info, account, result) in results {
             match result {
                 Ok(Some(receipt)) => {
                     // Transaction successfully confirmed
                     self.pending_txns.remove(&info);
-                    successful_txns.push((info, receipt));
+                    successful_txns.push((info, receipt.status()));
                 }
                 Ok(None) => {
                     // Transaction still pending
-                    failed_txns.push(info);
+                    if let Ok(account) = account {
+                        if account.nonce > info.metadata.nonce {
+                            successful_txns.push((info, true));
+                        }
+                    } else {
+                        failed_txns.push(info);
+                    }
                 }
                 Err(e) => {
                     // RPC query failed
@@ -399,7 +410,7 @@ impl TxnTracker {
         }
 
         // 3. Process the confirmed transactions from this sampling
-        for (info, receipt) in successful_txns {
+        for (info, receipt_status) in successful_txns {
             let latency = info.submit_time.elapsed();
             self.latencies.push_back(latency);
             if self.latencies.len() > 1000 {
@@ -410,7 +421,7 @@ impl TxnTracker {
                 plan_tracker.resolved_transactions += 1;
                 self.resolved_txn_timestamps.push_back(Instant::now());
                 self.total_resolved_transactions += 1;
-                if !receipt.status() {
+                if !receipt_status {
                     plan_tracker.failed_executions += 1;
                     self.total_failed_executions += 1;
                     warn!(
