@@ -8,9 +8,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use std::{
-    collections::HashMap,
-    marker::PhantomData,
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    collections::HashMap, future::Future, marker::PhantomData, pin::Pin, sync::{Arc, Mutex, atomic::AtomicU64}
 };
 use tracing::info;
 
@@ -33,9 +31,11 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     _phantom: PhantomData<T>,
 }
 
+type BalanceFetcher = Arc<dyn Fn(&Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>> + Send + Sync>;
+
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub fn new(
-        eth_client: Arc<EthHttpCli>,
+        balance_fetcher: BalanceFetcher,
         faucet_level: usize,
         faucet: PrivateKeySigner,
         start_nonce: u64,
