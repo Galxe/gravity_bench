@@ -1,5 +1,6 @@
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 
 /// Complete configuration structure

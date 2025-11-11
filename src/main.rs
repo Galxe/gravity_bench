@@ -288,43 +288,42 @@ async fn main() -> Result<()> {
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-        let faucet_address =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-        let faucet_start_nonce = eth_clients[0]
-            .get_transaction_count(faucet_address.address())
-            .await
-            .unwrap();
-        let faucet_balance = eth_clients[0]
-            .get_balance(&faucet_address.address())
-            .await
-            .unwrap();
-
-        info!("Initializing Faucet constructor...");
-        let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-            benchmark_config.faucet.faucet_level as usize,
-            faucet_balance,
-            &benchmark_config.faucet.private_key,
-            faucet_start_nonce,
-            account_addresses.clone(),
-            Arc::new(EthFaucetTxnBuilder),
-            U256::from(benchmark_config.num_tokens)
-                * U256::from(21000)
-                * U256::from(1000_000_000_000u64),
-            &mut accout_generator,
-        )
+    let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+    let faucet_start_nonce = eth_clients[0]
+        .get_transaction_count(faucet_address.address())
+        .await
         .unwrap();
-        execute_faucet_distribution(
-            eth_faucet_builder,
-            chain_id,
-            &producer,
-            "ETH",
-            benchmark_config.faucet.wait_duration_secs,
-        )
-        .await?;
+    let faucet_balance = eth_clients[0]
+        .get_balance(&faucet_address.address())
+        .await
+        .unwrap();
 
-        let all_token_addresses = contract_config.get_all_token_addresses();
-        let faucet_signer_for_token =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+    info!("Initializing Faucet constructor...");
+    let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+        benchmark_config.faucet.faucet_level as usize,
+        faucet_balance,
+        &benchmark_config.faucet.private_key,
+        faucet_start_nonce,
+        account_addresses.clone(),
+        Arc::new(EthFaucetTxnBuilder),
+        U256::from(benchmark_config.num_tokens)
+            * U256::from(21000)
+            * U256::from(1000_000_000_000u64),
+        &mut accout_generator,
+    )
+    .unwrap();
+    execute_faucet_distribution(
+        eth_faucet_builder,
+        chain_id,
+        &producer,
+        "ETH",
+        benchmark_config.faucet.wait_duration_secs,
+    )
+    .await?;
+
+    let all_token_addresses = contract_config.get_all_token_addresses();
+    let faucet_signer_for_token =
+        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
     for token in &all_token_addresses {
         info!("distributing token: {}", token);
@@ -411,18 +410,5 @@ async fn init_nonce(
     recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
     let mut nonce_map = HashMap::with_capacity(accounts.len());
-    if recover {
-        for account in accounts.iter() {
-            let nonce = eth_client
-                .get_transaction_count(*account.0.clone())
-                .await
-                .unwrap();
-            nonce_map.insert(account.0.clone(), nonce as u32);
-        }
-    } else {
-        for account in accounts.iter() {
-            nonce_map.insert(account.0.clone(), 0);
-        }
-    }
     nonce_map
 }
