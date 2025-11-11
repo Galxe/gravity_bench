@@ -386,8 +386,8 @@ impl Handler<UpdateSubmissionResult> for Producer {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;
             }
-            SubmissionResult::NonceTooLow(_) => {
-                self.stats.failed_txns += 1;
+            SubmissionResult::NonceTooLow{..} => {
+                self.stats.success_txns += 1;
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
@@ -401,8 +401,8 @@ impl Handler<UpdateSubmissionResult> for Producer {
                     SubmissionResult::Success(_) => {
                         manager.unlock_next_nonce(account);
                     }
-                    SubmissionResult::NonceTooLow((nonce, _tx_hash)) => {
-                        manager.unlock_correct_nonce(account, *nonce as u32);
+                    SubmissionResult::NonceTooLow{expect_nonce, ..} => {
+                        manager.unlock_correct_nonce(account, *expect_nonce as u32);
                     }
                     SubmissionResult::ErrorWithRetry => {
                         manager.retry_current_nonce(account);

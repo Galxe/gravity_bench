@@ -191,7 +191,7 @@ impl TxnTracker {
                 // Insert transaction into the global, time-sorted BTreeSet
                 self.pending_txns.insert(pending_info);
             }
-            SubmissionResult::NonceTooLow((nonce, tx_hash)) => {
+            SubmissionResult::NonceTooLow{tx_hash, expect_nonce, actual_nonce, from_account} => {
                 let pending_info = PendingTxInfo {
                     tx_hash: *tx_hash,
                     metadata: msg.metadata.clone(),
@@ -200,8 +200,8 @@ impl TxnTracker {
                 };
                 self.pending_txns.insert(pending_info);
                 warn!(
-                    "Transaction submission failed because nonce is too low: plan_id={}, nonce={}, tx_hash={:?}",
-                    plan_id, nonce, tx_hash
+                    "Transaction submission failed because nonce is too low: account={:?}, expect_nonce={}, actual_nonce={}, tx_hash={:?}",
+                    from_account, expect_nonce, actual_nonce, tx_hash
                 );
             }
             e => {

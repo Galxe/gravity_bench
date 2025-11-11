@@ -24,7 +24,7 @@ use crate::{
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
     },
-    util::gen_account::gen_account,
+    util::gen_account::AccountGenerator,
 };
 
 #[derive(Parser, Debug)]
@@ -214,13 +214,11 @@ async fn main() -> Result<()> {
         .with_thread_ids(false)
         .init();
 
-    let (contract_config, accounts) = if args.recover {
+    let contract_config = if args.recover {
         info!("Starting in recovery mode...");
         let contract_config =
             ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        let accounts = load_accounts_from_file("accounts.txt").await?;
-        info!("Loaded {} accounts from accounts.txt", accounts.len());
-        (contract_config, accounts)
+        contract_config
     } else {
         info!("Starting in normal mode...");
         let mut command = format!(
@@ -241,10 +239,13 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|e| {
             panic!("Contract config file not found {}", e);
         });
-        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
-        (contract_config, accounts)
+        contract_config
     };
 
+    let mut accout_generator = AccountGenerator::default();
+    let accounts = accout_generator
+        .gen_or_get_accounts(None::<&str>, benchmark_config.accounts.num_accounts)
+        .unwrap();
     let account_addresses = Arc::new(
         accounts
             .keys()
@@ -287,7 +288,6 @@ async fn main() -> Result<()> {
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    if !args.recover {
         let faucet_address =
             PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
         let faucet_start_nonce = eth_clients[0]
@@ -310,6 +310,7 @@ async fn main() -> Result<()> {
             U256::from(benchmark_config.num_tokens)
                 * U256::from(21000)
                 * U256::from(1000_000_000_000u64),
+            &mut accout_generator,
         )
         .unwrap();
         execute_faucet_distribution(
@@ -325,55 +326,55 @@ async fn main() -> Result<()> {
         let faucet_signer_for_token =
             PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
-        for token in &all_token_addresses {
-            info!("distributing token: {}", token);
+    for token in &all_token_addresses {
+        info!("distributing token: {}", token);
 
-            let faucet_current_nonce = eth_clients[0]
-                .get_transaction_count(faucet_signer_for_token.address())
-                .await
-                .unwrap();
-            let balance = IERC20::new(*token, eth_clients[0].provider())
-                .balanceOf(faucet_signer_for_token.address())
-                .call()
-                .await
-                .unwrap();
-
-            info!("balance of token: {}", balance);
-
-            let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-                benchmark_config.faucet.faucet_level as usize,
-                balance,
-                &benchmark_config.faucet.private_key,
-                faucet_current_nonce,
-                account_addresses.clone(),
-                Arc::new(Erc20FaucetTxnBuilder::new(*token)),
-                U256::ZERO,
-            )
-            .unwrap();
-
-            execute_faucet_distribution(
-                token_faucet_builder,
-                chain_id,
-                &producer,
-                &format!("Token {}", token),
-                benchmark_config.faucet.wait_duration_secs,
-            )
-            .await?;
-        }
-
-        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-        for account in accounts.iter() {
-            file.write(
-                format!(
-                    "{}, {}\n",
-                    account.0.to_string(),
-                    hex::encode(account.1.to_bytes())
-                )
-                .as_bytes(),
-            )
+        let faucet_current_nonce = eth_clients[0]
+            .get_transaction_count(faucet_signer_for_token.address())
             .await
             .unwrap();
-        }
+        let balance = IERC20::new(*token, eth_clients[0].provider())
+            .balanceOf(faucet_signer_for_token.address())
+            .call()
+            .await
+            .unwrap();
+
+        info!("balance of token: {}", balance);
+
+        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+            benchmark_config.faucet.faucet_level as usize,
+            balance,
+            &benchmark_config.faucet.private_key,
+            faucet_current_nonce,
+            account_addresses.clone(),
+            Arc::new(Erc20FaucetTxnBuilder::new(*token)),
+            U256::ZERO,
+            &mut accout_generator,
+        )
+        .unwrap();
+
+        execute_faucet_distribution(
+            token_faucet_builder,
+            chain_id,
+            &producer,
+            &format!("Token {}", token),
+            benchmark_config.faucet.wait_duration_secs,
+        )
+        .await?;
+    }
+
+    let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
+    for account in accounts.iter() {
+        file.write(
+            format!(
+                "{}, {}\n",
+                account.0.to_string(),
+                hex::encode(account.1.to_bytes())
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
     }
 
     let tps = benchmark_config.target_tps as usize;

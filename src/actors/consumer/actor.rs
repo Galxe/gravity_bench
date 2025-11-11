@@ -279,14 +279,17 @@ impl Consumer {
                             // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated
                             if next_nonce > metadata.nonce {
                                 // Try to find the hash of the transaction using our nonce
-
+                                let actual_nonce = metadata.nonce;
+                                let from_account = metadata.from_account.clone();
                                 // Can't find hash, but can provide correct nonce
                                 monitor_addr.do_send(UpdateSubmissionResult {
                                     metadata,
-                                    result: Arc::new(SubmissionResult::NonceTooLow((
-                                        next_nonce,
-                                        keccak256(&signed_txn.bytes),
-                                    ))),
+                                    result: Arc::new(SubmissionResult::NonceTooLow{
+                                        tx_hash: keccak256(&signed_txn.bytes),
+                                        expect_nonce: next_nonce,
+                                        actual_nonce,
+                                        from_account,
+                                    }),
                                     rpc_url: url,
                                     send_time: Instant::now(),
                                 });
