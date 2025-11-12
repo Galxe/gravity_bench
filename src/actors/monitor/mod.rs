@@ -31,7 +31,7 @@ pub struct RegisterPlan {
 
 #[derive(Debug)]
 pub enum SubmissionResult {
-    NonceTooLow{
+    NonceTooLow {
         tx_hash: TxHash,
         expect_nonce: u64,
         actual_nonce: u64,

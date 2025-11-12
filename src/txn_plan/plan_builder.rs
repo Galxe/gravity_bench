@@ -6,11 +6,17 @@ use alloy::{
 };
 
 use crate::{
-    config::LiquidityPair, eth::EthHttpCli, txn_plan::{
-        TxnPlan, constructor::{
-            ApproveTokenConstructor, BalanceFetcher, Erc20TransferConstructor, FaucetTreePlanBuilder, SwapEthToTokenConstructor, SwapTokenToTokenConstructor
-        }, faucet_txn_builder::FaucetTxnBuilder, plan::ManyToOnePlan, traits::PlanExecutionMode
-    }
+    config::LiquidityPair,
+    txn_plan::{
+        constructor::{
+            ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
+            SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
+        },
+        faucet_txn_builder::FaucetTxnBuilder,
+        plan::ManyToOnePlan,
+        traits::PlanExecutionMode,
+        TxnPlan,
+    },
 };
 
 /// Plan builder - Provides convenient APIs to create various types of transaction plans
@@ -89,7 +95,8 @@ impl PlanBuilder {
             txn_builder,
             remained_eth,
             account_generator,
-        ).await;
+        )
+        .await;
         Ok(Arc::new(constructor))
     }
 

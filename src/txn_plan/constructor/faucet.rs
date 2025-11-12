@@ -1,14 +1,19 @@
 use crate::{
-    eth::EthHttpCli, txn_plan::{
+    txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
-    }, util::gen_account
+    },
+    util::gen_account,
 };
 use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
 use std::{
-    collections::HashMap, future::Future, marker::PhantomData, pin::Pin, sync::{Arc, Mutex, atomic::AtomicU64}
+    collections::HashMap,
+    future::Future,
+    marker::PhantomData,
+    pin::Pin,
+    sync::{atomic::AtomicU64, Arc, Mutex},
 };
 use tracing::info;
 
@@ -31,7 +36,11 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     _phantom: PhantomData<T>,
 }
 
-pub type BalanceFetcher = Arc<dyn Fn(Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>> + Send + Sync>;
+pub type BalanceFetcher = Arc<
+    dyn Fn(Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>>
+        + Send
+        + Sync,
+>;
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub async fn new(
@@ -111,10 +120,12 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let num_intermediate_levels = total_levels - 1;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let accounts = account_generator.gen_or_get_accounts(
-                    Some(format!("intermediate_level_{}", level)),
-                    num_accounts_at_level as usize,
-                ).unwrap();
+                let accounts = account_generator
+                    .gen_or_get_accounts(
+                        Some(format!("intermediate_level_{}", level)),
+                        num_accounts_at_level as usize,
+                    )
+                    .unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }

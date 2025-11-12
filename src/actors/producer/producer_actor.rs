@@ -189,7 +189,9 @@ impl Producer {
             if next_nonce > signed_txn.metadata.nonce as u32 {
                 tracing::debug!(
                     "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                    signed_txn.metadata.from_account, next_nonce, signed_txn.metadata.nonce
+                    signed_txn.metadata.from_account,
+                    next_nonce,
+                    signed_txn.metadata.nonce
                 );
                 continue;
             }
@@ -404,9 +406,10 @@ impl Handler<UpdateSubmissionResult> for Producer {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;
             }
-            SubmissionResult::NonceTooLow{..} => {
+            SubmissionResult::NonceTooLow { .. } => {
                 self.stats.success_txns += 1;
-                self.nonce_cache.insert(account.clone(), msg.metadata.nonce as u32);
+                self.nonce_cache
+                    .insert(account.clone(), msg.metadata.nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
@@ -420,10 +423,12 @@ impl Handler<UpdateSubmissionResult> for Producer {
                     SubmissionResult::Success(_) => {
                         manager.unlock_next_nonce(account);
                     }
-                    SubmissionResult::NonceTooLow{expect_nonce, ..} => {
+                    SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                         tracing::debug!(
                             "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                            account, expect_nonce, msg.metadata.nonce
+                            account,
+                            expect_nonce,
+                            msg.metadata.nonce
                         );
                         manager.unlock_correct_nonce(account, *expect_nonce as u32);
                     }

@@ -211,7 +211,9 @@ impl Consumer {
         for attempt in 1..=MAX_RETRIES {
             tracing::debug!(
                 "Attempt {}/{} to send txn {:?}",
-                attempt, MAX_RETRIES, metadata.txn_id
+                attempt,
+                MAX_RETRIES,
+                metadata.txn_id
             );
             match dispatcher
                 .send_tx(signed_txn.bytes.clone(), metadata.txn_id)
@@ -280,7 +282,7 @@ impl Consumer {
                                 // Can't find hash, but can provide correct nonce
                                 monitor_addr.do_send(UpdateSubmissionResult {
                                     metadata,
-                                    result: Arc::new(SubmissionResult::NonceTooLow{
+                                    result: Arc::new(SubmissionResult::NonceTooLow {
                                         tx_hash: keccak256(&signed_txn.bytes),
                                         expect_nonce: next_nonce,
                                         actual_nonce,
@@ -292,10 +294,7 @@ impl Consumer {
                             }
                         } else {
                             // Failed to get nonce, can only mark as retryable error
-                            warn!(
-                                "Failed to get nonce for txn {:?}: {}",
-                                metadata.txn_id, e
-                            );
+                            warn!("Failed to get nonce for txn {:?}: {}", metadata.txn_id, e);
                             monitor_addr.do_send(UpdateSubmissionResult {
                                 metadata,
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),

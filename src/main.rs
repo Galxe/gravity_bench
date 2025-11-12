@@ -17,7 +17,7 @@ use tracing::{info, Level};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
-    config::{BenchConfig, ContractConfig, IERC20},
+    config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
         constructor::FaucetTreePlanBuilder,
@@ -397,6 +397,6 @@ async fn init_nonce(
     eth_client: Arc<EthHttpCli>,
     recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
-    let mut nonce_map = HashMap::with_capacity(accounts.len());
+    let nonce_map = HashMap::with_capacity(accounts.len());
     nonce_map
 }

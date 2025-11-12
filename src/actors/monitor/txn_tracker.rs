@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use alloy::consensus::Account;
 use alloy::primitives::TxHash;
-use alloy::rpc::types::TransactionReceipt;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
 use tracing::{debug, error, warn};
 
@@ -193,7 +192,12 @@ impl TxnTracker {
                 // Insert transaction into the global, time-sorted BTreeSet
                 self.pending_txns.insert(pending_info);
             }
-            SubmissionResult::NonceTooLow{tx_hash, expect_nonce, actual_nonce, from_account} => {
+            SubmissionResult::NonceTooLow {
+                tx_hash,
+                expect_nonce,
+                actual_nonce,
+                from_account,
+            } => {
                 let pending_info = PendingTxInfo {
                     tx_hash: *tx_hash,
                     metadata: msg.metadata.clone(),
@@ -306,10 +310,13 @@ impl TxnTracker {
 
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
-                    let account = client.get_account(*task_info.metadata.from_account.as_ref()).await;
+                    let account = client
+                        .get_account(*task_info.metadata.from_account.as_ref())
+                        .await;
                     tracing::debug!(
                         "checked tx_hash={:?} result={:?}",
-                        task_info.tx_hash, result
+                        task_info.tx_hash,
+                        result
                     );
                     (task_info, account, result)
                 };

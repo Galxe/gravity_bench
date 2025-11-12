@@ -5,16 +5,13 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::{Context, Result};
-use rand::{thread_rng, Rng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
 
 #[derive(Default)]
 pub struct AccountGenerator {
     offset: u64,
     cache: HashMap<String, HashMap<Arc<Address>, Arc<PrivateKeySigner>>>,
 }
-
 
 impl AccountGenerator {
     pub fn gen_or_get_accounts(
@@ -28,10 +25,8 @@ impl AccountGenerator {
                 return Ok(accounts.clone());
             }
         }
-        let accounts = gen_deterministic_accounts(
-            (self.offset..self.offset + size as u64)
-            .into_par_iter()
-        )?;
+        let accounts =
+            gen_deterministic_accounts((self.offset..self.offset + size as u64).into_par_iter())?;
         self.offset += size as u64;
         if let Some(key) = &key {
             self.cache.entry(key.clone()).or_insert(accounts.clone());
@@ -39,7 +34,6 @@ impl AccountGenerator {
         Ok(accounts)
     }
 }
-
 
 /// Deterministically generate n Ethereum accounts from a slice of u64 seeds.
 ///
