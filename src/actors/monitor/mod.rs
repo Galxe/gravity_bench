@@ -47,6 +47,7 @@ pub struct UpdateSubmissionResult {
     pub metadata: Arc<TxnMetadata>,
     pub result: Arc<SubmissionResult>,
     pub rpc_url: String,
+    #[allow(unused)]
     pub send_time: Instant,
 }
 

@@ -37,6 +37,7 @@ pub struct Token {
     pub symbol: String,
     pub address: String,
     #[serde(rename = "faucet_address")]
+    #[allow(unused)]
     pub faucet_address: String,
     #[serde(rename = "faucet_balance")]
     pub faucet_balance: String,

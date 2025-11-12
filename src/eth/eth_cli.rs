@@ -148,10 +148,6 @@ impl EthHttpCli {
         Ok(txn_sender)
     }
 
-    pub fn provider(&self) -> Arc<RootProvider<Ethereum>> {
-        self.inner[0].clone()
-    }
-
     #[allow(unused)]
     pub fn chain_id(&self) -> u64 {
         self.chain_id
@@ -184,6 +180,7 @@ impl EthHttpCli {
     }
 
     /// Get account transaction count (nonce)
+    #[allow(unused)]
     pub async fn get_transaction_count(&self, address: Address) -> Result<u64> {
         let start = Instant::now();
 
@@ -199,6 +196,7 @@ impl EthHttpCli {
     }
 
     /// Get account balance
+    #[allow(unused)]
     pub async fn get_balance(&self, address: &Address) -> Result<U256> {
         let start = Instant::now();
 

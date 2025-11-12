@@ -47,6 +47,7 @@ mod config;
 mod eth;
 mod txn_plan;
 
+#[allow(unused)]
 async fn load_accounts_from_file(
     path: &str,
 ) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
@@ -288,7 +289,6 @@ async fn main() -> Result<()> {
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
     info!("Initializing Faucet constructor...");
     let mut start_nonce = 1;
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
@@ -315,18 +315,13 @@ async fn main() -> Result<()> {
     .await?;
 
     let tokens = contract_config.get_all_token();
-    let faucet_signer_for_token =
-        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-
+    
     for token in &tokens {
         start_nonce += benchmark_config.faucet.faucet_level as u64;
         info!("distributing token: {}", token.address);
         let token_address = Address::from_str(&token.address).unwrap();
-        let faucet_token_address = Address::from_str(&token.faucet_address).unwrap();
         let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
         info!("balance of token: {}", faucet_token_balance);
-        let client_clone = eth_clients[0].clone();
-        let token_clone = token.clone();
         let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
             faucet_token_balance,
@@ -394,8 +389,9 @@ async fn main() -> Result<()> {
 
 async fn init_nonce(
     accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    eth_client: Arc<EthHttpCli>,
-    recover: bool,
+    
+    _eth_client: Arc<EthHttpCli>,
+    _recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
     let nonce_map = HashMap::with_capacity(accounts.len());
     nonce_map

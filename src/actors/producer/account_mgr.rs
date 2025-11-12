@@ -105,12 +105,4 @@ impl AccountManager {
             ));
         }
     }
-
-    pub(crate) fn get_next_nonce(&self, account: Arc<Address>) -> u32 {
-        if let Some(status) = self.account_status.get(&account) {
-            *status + 1
-        } else {
-            1
-        }
-    }
 }

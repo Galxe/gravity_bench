@@ -10,9 +10,7 @@ use alloy::{
 };
 use std::{
     collections::HashMap,
-    future::Future,
     marker::PhantomData,
-    pin::Pin,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
 use tracing::info;
@@ -35,12 +33,6 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
     txn_builder: Arc<T>,
     _phantom: PhantomData<T>,
 }
-
-pub type BalanceFetcher = Arc<
-    dyn Fn(Address) -> Pin<Box<dyn Future<Output = Result<U256, anyhow::Error>> + Send>>
-        + Send
-        + Sync,
->;
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub async fn new(
