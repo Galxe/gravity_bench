@@ -1,6 +1,7 @@
 use actix::prelude::*;
 use alloy::primitives::Address;
 use alloy::signers::local::PrivateKeySigner;
+use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -71,6 +72,8 @@ pub struct Producer {
     monitor_addr: Addr<Monitor>,
     consumer_addr: Addr<Consumer>,
 
+    nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
     plan_queue: VecDeque<Box<dyn TxnPlan>>,
     /// Tracks pending plans to respond to the original requester upon completion.
@@ -101,6 +104,7 @@ impl Producer {
                 account_signers,
                 account_nonce,
             ))),
+            nonce_cache: Arc::new(DashMap::new()),
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
@@ -145,6 +149,7 @@ impl Producer {
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
+        nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
     ) -> Result<(), anyhow::Error> {
         tracing::debug!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
@@ -177,6 +182,19 @@ impl Producer {
                 tracing::debug!("Producer is paused");
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
+            let next_nonce = match nonce_cache.get(signed_txn.metadata.from_account.as_ref()) {
+                Some(nonce) => *nonce,
+                None => 0,
+            };
+            if next_nonce > signed_txn.metadata.nonce as u32 {
+                tracing::debug!(
+                    "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
+                    signed_txn.metadata.from_account,
+                    next_nonce,
+                    signed_txn.metadata.nonce
+                );
+                continue;
+            }
             if let Err(e) = consumer_addr.send(signed_txn).await {
                 // If sending to the consumer fails, we abort the entire plan.
                 tracing::error!(
@@ -198,6 +216,7 @@ impl Producer {
         }
         monitor_addr.do_send(PlanProduced {
             plan_id: plan_id.clone(),
+            count,
         });
 
         tracing::debug!(
@@ -254,6 +273,7 @@ impl Handler<ExeFrontPlan> for Producer {
         let self_addr = ctx.address();
         let sending_txns = self.stats.sending_txns.clone();
         let state = self.state.clone();
+        let nonce_cache = self.nonce_cache.clone();
         Box::pin(
             async move {
                 // Check if the plan is ready to be executed.
@@ -275,6 +295,7 @@ impl Handler<ExeFrontPlan> for Producer {
                     plan,
                     sending_txns,
                     state,
+                    nonce_cache,
                 )
                 .await
                 {
@@ -386,8 +407,10 @@ impl Handler<UpdateSubmissionResult> for Producer {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;
             }
-            SubmissionResult::NonceTooLow(_) => {
-                self.stats.failed_txns += 1;
+            SubmissionResult::NonceTooLow { expect_nonce, .. } => {
+                self.stats.success_txns += 1;
+                self.nonce_cache
+                    .insert(account.clone(), *expect_nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
@@ -401,8 +424,14 @@ impl Handler<UpdateSubmissionResult> for Producer {
                     SubmissionResult::Success(_) => {
                         manager.unlock_next_nonce(account);
                     }
-                    SubmissionResult::NonceTooLow((nonce, _tx_hash)) => {
-                        manager.unlock_correct_nonce(account, *nonce as u32);
+                    SubmissionResult::NonceTooLow { expect_nonce, .. } => {
+                        tracing::debug!(
+                            "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
+                            account,
+                            expect_nonce,
+                            msg.metadata.nonce
+                        );
+                        manager.unlock_correct_nonce(account, *expect_nonce as u32);
                     }
                     SubmissionResult::ErrorWithRetry => {
                         manager.retry_current_nonce(account);

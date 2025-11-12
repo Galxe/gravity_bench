@@ -1,5 +1,5 @@
 use alloy::{
-    consensus::TxEnvelope,
+    consensus::{Account, TxEnvelope},
     eips::Encodable2718,
     network::Ethereum,
     primitives::{Address, TxHash, U256},
@@ -148,10 +148,6 @@ impl EthHttpCli {
         Ok(txn_sender)
     }
 
-    pub fn provider(&self) -> Arc<RootProvider<Ethereum>> {
-        self.inner[0].clone()
-    }
-
     #[allow(unused)]
     pub fn chain_id(&self) -> u64 {
         self.chain_id
@@ -184,6 +180,7 @@ impl EthHttpCli {
     }
 
     /// Get account transaction count (nonce)
+    #[allow(unused)]
     pub async fn get_transaction_count(&self, address: Address) -> Result<u64> {
         let start = Instant::now();
 
@@ -199,6 +196,7 @@ impl EthHttpCli {
     }
 
     /// Get account balance
+    #[allow(unused)]
     pub async fn get_balance(&self, address: &Address) -> Result<U256> {
         let start = Instant::now();
 
@@ -517,5 +515,10 @@ impl EthHttpCli {
             .await;
 
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
+    }
+
+    pub async fn get_account(&self, address: Address) -> Result<Account> {
+        self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
+            .await
     }
 }

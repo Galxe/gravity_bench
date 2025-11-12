@@ -1,5 +1,6 @@
+use alloy::primitives::U256;
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 
 /// Complete configuration structure
@@ -22,12 +23,22 @@ pub struct NodeConfig {
     pub chain_id: u64,
 }
 
+fn from_str_to_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(U256::from_str_radix(&s, 10).map_err(serde::de::Error::custom)?)
+}
+
 /// Faucet and deployer account configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FaucetConfig {
     pub private_key: String,
     pub faucet_level: u32,
     pub wait_duration_secs: u64,
+    #[serde(deserialize_with = "from_str_to_u256")]
+    pub fauce_eth_balance: U256,
 }
 
 /// Load testing account configuration

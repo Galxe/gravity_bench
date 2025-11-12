@@ -17,14 +17,14 @@ use tracing::{info, Level};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
-    config::{BenchConfig, ContractConfig, IERC20},
+    config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
         constructor::FaucetTreePlanBuilder,
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
     },
-    util::gen_account::gen_account,
+    util::gen_account::AccountGenerator,
 };
 
 #[derive(Parser, Debug)]
@@ -47,6 +47,7 @@ mod config;
 mod eth;
 mod txn_plan;
 
+#[allow(unused)]
 async fn load_accounts_from_file(
     path: &str,
 ) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
@@ -214,13 +215,11 @@ async fn main() -> Result<()> {
         .with_thread_ids(false)
         .init();
 
-    let (contract_config, accounts) = if args.recover {
+    let contract_config = if args.recover {
         info!("Starting in recovery mode...");
         let contract_config =
             ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        let accounts = load_accounts_from_file("accounts.txt").await?;
-        info!("Loaded {} accounts from accounts.txt", accounts.len());
-        (contract_config, accounts)
+        contract_config
     } else {
         info!("Starting in normal mode...");
         let mut command = format!(
@@ -241,10 +240,13 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|e| {
             panic!("Contract config file not found {}", e);
         });
-        let accounts = gen_account(benchmark_config.accounts.num_accounts).unwrap();
-        (contract_config, accounts)
+        contract_config
     };
 
+    let mut accout_generator = AccountGenerator::default();
+    let accounts = accout_generator
+        .gen_or_get_accounts(None::<&str>, benchmark_config.accounts.num_accounts)
+        .unwrap();
     let account_addresses = Arc::new(
         accounts
             .keys()
@@ -287,93 +289,74 @@ async fn main() -> Result<()> {
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
 
-    if !args.recover {
-        let faucet_address =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-        let faucet_start_nonce = eth_clients[0]
-            .get_transaction_count(faucet_address.address())
-            .await
-            .unwrap();
-        let faucet_balance = eth_clients[0]
-            .get_balance(&faucet_address.address())
-            .await
-            .unwrap();
+    info!("Initializing Faucet constructor...");
+    let mut start_nonce = 1;
+    let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+        benchmark_config.faucet.faucet_level as usize,
+        benchmark_config.faucet.fauce_eth_balance,
+        &benchmark_config.faucet.private_key,
+        start_nonce,
+        account_addresses.clone(),
+        Arc::new(EthFaucetTxnBuilder),
+        U256::from(benchmark_config.num_tokens)
+            * U256::from(21000)
+            * U256::from(1000_000_000_000u64),
+        &mut accout_generator,
+    )
+    .await
+    .unwrap();
+    execute_faucet_distribution(
+        eth_faucet_builder,
+        chain_id,
+        &producer,
+        "ETH",
+        benchmark_config.faucet.wait_duration_secs,
+    )
+    .await?;
 
-        info!("Initializing Faucet constructor...");
-        let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+    let tokens = contract_config.get_all_token();
+
+    for token in &tokens {
+        start_nonce += benchmark_config.faucet.faucet_level as u64;
+        info!("distributing token: {}", token.address);
+        let token_address = Address::from_str(&token.address).unwrap();
+        let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
+        info!("balance of token: {}", faucet_token_balance);
+        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
             benchmark_config.faucet.faucet_level as usize,
-            faucet_balance,
+            faucet_token_balance,
             &benchmark_config.faucet.private_key,
-            faucet_start_nonce,
+            1 + benchmark_config.faucet.faucet_level as u64,
             account_addresses.clone(),
-            Arc::new(EthFaucetTxnBuilder),
-            U256::from(benchmark_config.num_tokens)
-                * U256::from(21000)
-                * U256::from(1000_000_000_000u64),
+            Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
+            U256::ZERO,
+            &mut accout_generator,
         )
+        .await
         .unwrap();
+
         execute_faucet_distribution(
-            eth_faucet_builder,
+            token_faucet_builder,
             chain_id,
             &producer,
-            "ETH",
+            &format!("Token {}", token.symbol),
             benchmark_config.faucet.wait_duration_secs,
         )
         .await?;
+    }
 
-        let all_token_addresses = contract_config.get_all_token_addresses();
-        let faucet_signer_for_token =
-            PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-
-        for token in &all_token_addresses {
-            info!("distributing token: {}", token);
-
-            let faucet_current_nonce = eth_clients[0]
-                .get_transaction_count(faucet_signer_for_token.address())
-                .await
-                .unwrap();
-            let balance = IERC20::new(*token, eth_clients[0].provider())
-                .balanceOf(faucet_signer_for_token.address())
-                .call()
-                .await
-                .unwrap();
-
-            info!("balance of token: {}", balance);
-
-            let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-                benchmark_config.faucet.faucet_level as usize,
-                balance,
-                &benchmark_config.faucet.private_key,
-                faucet_current_nonce,
-                account_addresses.clone(),
-                Arc::new(Erc20FaucetTxnBuilder::new(*token)),
-                U256::ZERO,
+    let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
+    for account in accounts.iter() {
+        file.write(
+            format!(
+                "{}, {}\n",
+                account.0.to_string(),
+                hex::encode(account.1.to_bytes())
             )
-            .unwrap();
-
-            execute_faucet_distribution(
-                token_faucet_builder,
-                chain_id,
-                &producer,
-                &format!("Token {}", token),
-                benchmark_config.faucet.wait_duration_secs,
-            )
-            .await?;
-        }
-
-        let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-        for account in accounts.iter() {
-            file.write(
-                format!(
-                    "{}, {}\n",
-                    account.0.to_string(),
-                    hex::encode(account.1.to_bytes())
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        }
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
     }
 
     let tps = benchmark_config.target_tps as usize;
@@ -406,22 +389,10 @@ async fn main() -> Result<()> {
 
 async fn init_nonce(
     accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    eth_client: Arc<EthHttpCli>,
-    recover: bool,
+
+    _eth_client: Arc<EthHttpCli>,
+    _recover: bool,
 ) -> HashMap<Arc<Address>, u32> {
-    let mut nonce_map = HashMap::with_capacity(accounts.len());
-    if recover {
-        for account in accounts.iter() {
-            let nonce = eth_client
-                .get_transaction_count(*account.0.clone())
-                .await
-                .unwrap();
-            nonce_map.insert(account.0.clone(), nonce as u32);
-        }
-    } else {
-        for account in accounts.iter() {
-            nonce_map.insert(account.0.clone(), 0);
-        }
-    }
+    let nonce_map = HashMap::with_capacity(accounts.len());
     nonce_map
 }

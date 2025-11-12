@@ -3,6 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use alloy::consensus::Account;
 use alloy::primitives::TxHash;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
 use tracing::{debug, error, warn};
@@ -143,7 +144,7 @@ impl TxnTracker {
         }
     }
 
-    pub fn handle_plan_produced(&mut self, plan_id: PlanId) {
+    pub fn handle_plan_produced(&mut self, plan_id: PlanId, _count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.plan_produced = true;
         }
@@ -191,7 +192,12 @@ impl TxnTracker {
                 // Insert transaction into the global, time-sorted BTreeSet
                 self.pending_txns.insert(pending_info);
             }
-            SubmissionResult::NonceTooLow((nonce, tx_hash)) => {
+            SubmissionResult::NonceTooLow {
+                tx_hash,
+                expect_nonce,
+                actual_nonce,
+                from_account,
+            } => {
                 let pending_info = PendingTxInfo {
                     tx_hash: *tx_hash,
                     metadata: msg.metadata.clone(),
@@ -199,9 +205,9 @@ impl TxnTracker {
                     submit_time: Instant::now(),
                 };
                 self.pending_txns.insert(pending_info);
-                warn!(
-                    "Transaction submission failed because nonce is too low: plan_id={}, nonce={}, tx_hash={:?}",
-                    plan_id, nonce, tx_hash
+                debug!(
+                    "Transaction submission failed because nonce is too low: account={:?}, expect_nonce={}, actual_nonce={}, tx_hash={:?}",
+                    from_account, expect_nonce, actual_nonce, tx_hash
                 );
             }
             e => {
@@ -222,35 +228,32 @@ impl TxnTracker {
 
     /// Check if plan is completed (no changes)
     pub fn check_plan_completion(&mut self, plan_id: &PlanId) -> PlanStatus {
+        let mut status = PlanStatus::InProgress;
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
-            debug!("Plan {}({}) status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
-                tracker.plan_name, plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
-            if tracker.produce_transactions != 0
-                && tracker.resolved_transactions as usize >= tracker.produce_transactions
-                && tracker.plan_produced
-            {
-                let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
-                let status = if has_failures {
-                    let reason = format!(
-                        "Plan failed: {} submission failures, {} execution failures",
-                        tracker.failed_submissions, tracker.failed_executions
-                    );
-                    warn!("Plan {} failed: {}", tracker.plan_name, reason);
-                    PlanStatus::Failed { reason }
-                } else {
-                    debug!("Plan {} completed successfully", plan_id);
-                    PlanStatus::Completed
-                };
-                if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
-                    self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+            if tracker.plan_produced {
+                if tracker.resolved_transactions as usize >= tracker.produce_transactions {
+                    let has_failures =
+                        tracker.failed_submissions > 0 || tracker.failed_executions > 0;
+                    status = if has_failures {
+                        let reason = format!(
+                            "Plan failed: {} submission failures, {} execution failures",
+                            tracker.failed_submissions, tracker.failed_executions
+                        );
+                        warn!("Plan {} failed: {}", tracker.plan_name, reason);
+                        PlanStatus::Failed { reason }
+                    } else {
+                        debug!("Plan {} completed successfully", plan_id);
+                        PlanStatus::Completed
+                    };
                 }
-                status
-            } else {
-                PlanStatus::InProgress
             }
-        } else {
-            PlanStatus::InProgress
         }
+        if let PlanStatus::Completed = status {
+            if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+            }
+        }
+        status
     }
 
     /// Get all active plan IDs being tracked (no changes)
@@ -264,6 +267,7 @@ impl TxnTracker {
         impl std::future::Future<
             Output = (
                 PendingTxInfo,
+                Result<Account, anyhow::Error>,
                 Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
             ),
         >,
@@ -303,11 +307,15 @@ impl TxnTracker {
 
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
-                    debug!(
+                    let account = client
+                        .get_account(*task_info.metadata.from_account.as_ref())
+                        .await;
+                    tracing::debug!(
                         "checked tx_hash={:?} result={:?}",
-                        task_info.tx_hash, result
+                        task_info.tx_hash,
+                        result
                     );
-                    (task_info, result)
+                    (task_info, account, result)
                 };
                 tasks.push(task);
             } else {
@@ -322,6 +330,7 @@ impl TxnTracker {
         &mut self,
         results: Vec<(
             PendingTxInfo,
+            Result<Account, anyhow::Error>,
             Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
         )>,
     ) {
@@ -329,16 +338,22 @@ impl TxnTracker {
         let mut failed_txns = Vec::new(); // Including Pending, Timeout, Error
 
         // 1. Categorize results
-        for (info, result) in results {
+        for (info, account, result) in results {
             match result {
                 Ok(Some(receipt)) => {
                     // Transaction successfully confirmed
                     self.pending_txns.remove(&info);
-                    successful_txns.push((info, receipt));
+                    successful_txns.push((info, receipt.status()));
                 }
                 Ok(None) => {
                     // Transaction still pending
-                    failed_txns.push(info);
+                    if let Ok(account) = account {
+                        if account.nonce > info.metadata.nonce {
+                            successful_txns.push((info, true));
+                        }
+                    } else {
+                        failed_txns.push(info);
+                    }
                 }
                 Err(e) => {
                     // RPC query failed
@@ -399,7 +414,7 @@ impl TxnTracker {
         }
 
         // 3. Process the confirmed transactions from this sampling
-        for (info, receipt) in successful_txns {
+        for (info, receipt_status) in successful_txns {
             let latency = info.submit_time.elapsed();
             self.latencies.push_back(latency);
             if self.latencies.len() > 1000 {
@@ -410,7 +425,7 @@ impl TxnTracker {
                 plan_tracker.resolved_transactions += 1;
                 self.resolved_txn_timestamps.push_back(Instant::now());
                 self.total_resolved_transactions += 1;
-                if !receipt.status() {
+                if !receipt_status {
                     plan_tracker.failed_executions += 1;
                     self.total_failed_executions += 1;
                     warn!(

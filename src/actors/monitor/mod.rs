@@ -4,7 +4,7 @@ pub mod monitor_actor;
 mod txn_tracker;
 
 use actix::Message;
-use alloy::primitives::TxHash;
+use alloy::primitives::{Address, TxHash};
 use std::{sync::Arc, time::Instant};
 
 use crate::txn_plan::{PlanId, TxnMetadata};
@@ -31,7 +31,12 @@ pub struct RegisterPlan {
 
 #[derive(Debug)]
 pub enum SubmissionResult {
-    NonceTooLow((u64, TxHash)),
+    NonceTooLow {
+        tx_hash: TxHash,
+        expect_nonce: u64,
+        actual_nonce: u64,
+        from_account: Arc<Address>,
+    },
     ErrorWithRetry,
     Success(TxHash),
 }
@@ -42,6 +47,7 @@ pub struct UpdateSubmissionResult {
     pub metadata: Arc<TxnMetadata>,
     pub result: Arc<SubmissionResult>,
     pub rpc_url: String,
+    #[allow(unused)]
     pub send_time: Instant,
 }
 

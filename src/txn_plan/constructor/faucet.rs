@@ -35,7 +35,7 @@ pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
 }
 
 impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
-    pub fn new(
+    pub async fn new(
         faucet_balance: U256,
         faucet_level: usize,
         faucet: PrivateKeySigner,
@@ -43,6 +43,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         final_recipients: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
+        account_generator: &mut gen_account::AccountGenerator,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -109,14 +110,14 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let mut account_levels = vec![];
         if total_levels > 1 {
             let num_intermediate_levels = total_levels - 1;
-            let mut seed_offset: u64 = 0;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let seeds: Vec<u64> = (0..num_accounts_at_level as u64)
-                    .map(|i| seed_offset + i)
-                    .collect();
-                seed_offset += num_accounts_at_level as u64;
-                let accounts = gen_account::gen_deterministic_accounts(&seeds).unwrap();
+                let accounts = account_generator
+                    .gen_or_get_accounts(
+                        Some(format!("intermediate_level_{}", level)),
+                        num_accounts_at_level as usize,
+                    )
+                    .unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
             }
         }

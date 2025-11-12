@@ -296,7 +296,15 @@ def main(args):
 
     # --- Generate Output File ---
     print("\n--- Generating Output File ---")
-    final_token_list = [{k: v for k, v in token.items() if k != 'contract'} for token in deployed_tokens]
+    final_token_list = []
+    for token in deployed_tokens:
+        final_token_list.append({
+            "symbol": token["symbol"],
+            "address": token["address"],
+            "faucet_address": account.address,
+            "faucet_balance": str(initial_supply),
+        })
+
     final_results = {
         "addresses": {
             "deployer": account.address,

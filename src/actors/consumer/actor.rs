@@ -209,9 +209,11 @@ impl Consumer {
 
         // --- New: Transaction sending retry loop ---
         for attempt in 1..=MAX_RETRIES {
-            debug!(
+            tracing::debug!(
                 "Attempt {}/{} to send txn {:?}",
-                attempt, MAX_RETRIES, metadata.txn_id
+                attempt,
+                MAX_RETRIES,
+                metadata.txn_id
             );
             match dispatcher
                 .send_tx(signed_txn.bytes.clone(), metadata.txn_id)
@@ -241,10 +243,6 @@ impl Consumer {
                 }
                 // Transaction sending failed, enter error handling and retry logic
                 Err((e, url)) => {
-                    warn!(
-                        "Attempt {} failed for txn {:?}: {}",
-                        attempt, metadata.txn_id, e
-                    );
                     let error_string = e.to_string().to_lowercase();
 
                     // --- Requirement 3: If it's an "underpriced" error ---
@@ -279,20 +277,24 @@ impl Consumer {
                             // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated
                             if next_nonce > metadata.nonce {
                                 // Try to find the hash of the transaction using our nonce
-
+                                let actual_nonce = metadata.nonce;
+                                let from_account = metadata.from_account.clone();
                                 // Can't find hash, but can provide correct nonce
                                 monitor_addr.do_send(UpdateSubmissionResult {
                                     metadata,
-                                    result: Arc::new(SubmissionResult::NonceTooLow((
-                                        next_nonce,
-                                        keccak256(&signed_txn.bytes),
-                                    ))),
+                                    result: Arc::new(SubmissionResult::NonceTooLow {
+                                        tx_hash: keccak256(&signed_txn.bytes),
+                                        expect_nonce: next_nonce,
+                                        actual_nonce,
+                                        from_account,
+                                    }),
                                     rpc_url: url,
                                     send_time: Instant::now(),
                                 });
                             }
                         } else {
                             // Failed to get nonce, can only mark as retryable error
+                            warn!("Failed to get nonce for txn {:?}: {}", metadata.txn_id, e);
                             monitor_addr.do_send(UpdateSubmissionResult {
                                 metadata,
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),
