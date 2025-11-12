@@ -209,7 +209,7 @@ impl Consumer {
 
         // --- New: Transaction sending retry loop ---
         for attempt in 1..=MAX_RETRIES {
-            debug!(
+            tracing::debug!(
                 "Attempt {}/{} to send txn {:?}",
                 attempt, MAX_RETRIES, metadata.txn_id
             );
@@ -241,10 +241,6 @@ impl Consumer {
                 }
                 // Transaction sending failed, enter error handling and retry logic
                 Err((e, url)) => {
-                    warn!(
-                        "Attempt {} failed for txn {:?}: {}",
-                        attempt, metadata.txn_id, e
-                    );
                     let error_string = e.to_string().to_lowercase();
 
                     // --- Requirement 3: If it's an "underpriced" error ---
@@ -296,6 +292,10 @@ impl Consumer {
                             }
                         } else {
                             // Failed to get nonce, can only mark as retryable error
+                            warn!(
+                                "Failed to get nonce for txn {:?}: {}",
+                                metadata.txn_id, e
+                            );
                             monitor_addr.do_send(UpdateSubmissionResult {
                                 metadata,
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),

@@ -290,11 +290,12 @@ async fn main() -> Result<()> {
 
     let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
     info!("Initializing Faucet constructor...");
+    let mut start_nonce = 1;
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
         benchmark_config.faucet.fauce_eth_balance,
         &benchmark_config.faucet.private_key,
-        1,
+        start_nonce,
         account_addresses.clone(),
         Arc::new(EthFaucetTxnBuilder),
         U256::from(benchmark_config.num_tokens)
@@ -318,6 +319,7 @@ async fn main() -> Result<()> {
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
 
     for token in &tokens {
+        start_nonce += benchmark_config.faucet.faucet_level as u64;
         info!("distributing token: {}", token.address);
         let token_address = Address::from_str(&token.address).unwrap();
         let faucet_token_address = Address::from_str(&token.faucet_address).unwrap();
@@ -329,7 +331,7 @@ async fn main() -> Result<()> {
             benchmark_config.faucet.faucet_level as usize,
             faucet_token_balance,
             &benchmark_config.faucet.private_key,
-            0,
+            1 + benchmark_config.faucet.faucet_level as u64,
             account_addresses.clone(),
             Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
             U256::ZERO,

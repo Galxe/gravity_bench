@@ -201,7 +201,7 @@ impl TxnTracker {
                     submit_time: Instant::now(),
                 };
                 self.pending_txns.insert(pending_info);
-                warn!(
+                debug!(
                     "Transaction submission failed because nonce is too low: account={:?}, expect_nonce={}, actual_nonce={}, tx_hash={:?}",
                     from_account, expect_nonce, actual_nonce, tx_hash
                 );
@@ -307,7 +307,7 @@ impl TxnTracker {
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
                     let account = client.get_account(*task_info.metadata.from_account.as_ref()).await;
-                    debug!(
+                    tracing::debug!(
                         "checked tx_hash={:?} result={:?}",
                         task_info.tx_hash, result
                     );
