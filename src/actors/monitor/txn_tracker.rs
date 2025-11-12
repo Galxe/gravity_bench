@@ -232,7 +232,8 @@ impl TxnTracker {
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
             if tracker.plan_produced {
                 if tracker.resolved_transactions as usize >= tracker.produce_transactions {
-                    let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
+                    let has_failures =
+                        tracker.failed_submissions > 0 || tracker.failed_executions > 0;
                     status = if has_failures {
                         let reason = format!(
                             "Plan failed: {} submission failures, {} execution failures",

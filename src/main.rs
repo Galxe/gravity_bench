@@ -315,7 +315,7 @@ async fn main() -> Result<()> {
     .await?;
 
     let tokens = contract_config.get_all_token();
-    
+
     for token in &tokens {
         start_nonce += benchmark_config.faucet.faucet_level as u64;
         info!("distributing token: {}", token.address);
@@ -389,7 +389,7 @@ async fn main() -> Result<()> {
 
 async fn init_nonce(
     accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    
+
     _eth_client: Arc<EthHttpCli>,
     _recover: bool,
 ) -> HashMap<Arc<Address>, u32> {

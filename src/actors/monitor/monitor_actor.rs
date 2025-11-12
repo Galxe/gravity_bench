@@ -208,6 +208,7 @@ impl Handler<PlanProduced> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: PlanProduced, _ctx: &mut Self::Context) {
-        self.txn_tracker.handle_plan_produced(msg.plan_id, msg.count);
+        self.txn_tracker
+            .handle_plan_produced(msg.plan_id, msg.count);
     }
 }
