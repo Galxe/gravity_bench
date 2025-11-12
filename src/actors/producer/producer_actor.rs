@@ -216,6 +216,7 @@ impl Producer {
         }
         monitor_addr.do_send(PlanProduced {
             plan_id: plan_id.clone(),
+            count,
         });
 
         tracing::debug!(
@@ -406,10 +407,10 @@ impl Handler<UpdateSubmissionResult> for Producer {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;
             }
-            SubmissionResult::NonceTooLow { .. } => {
+            SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                 self.stats.success_txns += 1;
                 self.nonce_cache
-                    .insert(account.clone(), msg.metadata.nonce as u32);
+                    .insert(account.clone(), *expect_nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;

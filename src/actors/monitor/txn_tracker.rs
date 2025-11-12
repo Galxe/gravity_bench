@@ -144,7 +144,7 @@ impl TxnTracker {
         }
     }
 
-    pub fn handle_plan_produced(&mut self, plan_id: PlanId) {
+    pub fn handle_plan_produced(&mut self, plan_id: PlanId, _count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.plan_produced = true;
         }
@@ -228,35 +228,31 @@ impl TxnTracker {
 
     /// Check if plan is completed (no changes)
     pub fn check_plan_completion(&mut self, plan_id: &PlanId) -> PlanStatus {
+        let mut status = PlanStatus::InProgress;
         if let Some(tracker) = self.plan_trackers.get(plan_id) {
-            debug!("Plan {}({}) status: produce_transactions={}, consumed_transactions={}, resolved_transactions={}, failed_submissions={}, failed_executions={}", 
-                tracker.plan_name, plan_id, tracker.produce_transactions, tracker.consumed_transactions, tracker.resolved_transactions, tracker.failed_submissions, tracker.failed_executions);
-            if tracker.produce_transactions != 0
-                && tracker.resolved_transactions as usize >= tracker.produce_transactions
-                && tracker.plan_produced
-            {
-                let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
-                let status = if has_failures {
-                    let reason = format!(
-                        "Plan failed: {} submission failures, {} execution failures",
-                        tracker.failed_submissions, tracker.failed_executions
-                    );
-                    warn!("Plan {} failed: {}", tracker.plan_name, reason);
-                    PlanStatus::Failed { reason }
-                } else {
-                    debug!("Plan {} completed successfully", plan_id);
-                    PlanStatus::Completed
-                };
-                if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
-                    self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+            if tracker.plan_produced {
+                if tracker.resolved_transactions as usize >= tracker.produce_transactions {
+                    let has_failures = tracker.failed_submissions > 0 || tracker.failed_executions > 0;
+                    status = if has_failures {
+                        let reason = format!(
+                            "Plan failed: {} submission failures, {} execution failures",
+                            tracker.failed_submissions, tracker.failed_executions
+                        );
+                        warn!("Plan {} failed: {}", tracker.plan_name, reason);
+                        PlanStatus::Failed { reason }
+                    } else {
+                        debug!("Plan {} completed successfully", plan_id);
+                        PlanStatus::Completed
+                    };
                 }
-                status
-            } else {
-                PlanStatus::InProgress
             }
-        } else {
-            PlanStatus::InProgress
         }
+        if let PlanStatus::Completed = status {
+            if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
+            }
+        }
+        status
     }
 
     /// Get all active plan IDs being tracked (no changes)
