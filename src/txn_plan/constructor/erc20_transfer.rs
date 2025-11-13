@@ -1,4 +1,7 @@
-use crate::{config::IERC20, txn_plan::FromTxnConstructor};
+use crate::{
+    config::IERC20,
+    txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
+};
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
@@ -14,7 +17,7 @@ pub struct Erc20TransferConstructor {
     pub token_list: Vec<Address>,
     pub transfer_amount: U256,
     pub chain_id: u64,
-    pub address_list: Arc<Vec<Arc<Address>>>,
+    pub address_pool: Arc<dyn AddressPool>,
 }
 
 impl Erc20TransferConstructor {
@@ -22,13 +25,13 @@ impl Erc20TransferConstructor {
         token_list: Vec<Address>,
         transfer_amount: U256,
         chain_id: u64,
-        address_list: Arc<Vec<Arc<Address>>>,
+        address_pool: Arc<dyn AddressPool>,
     ) -> Self {
         Self {
             token_list,
             transfer_amount,
             chain_id,
-            address_list,
+            address_pool,
         }
     }
 }
@@ -41,22 +44,11 @@ impl FromTxnConstructor for Erc20TransferConstructor {
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // random select a receiver address, ensure not to self
-        let idx = rand::random::<usize>() % self.address_list.len();
-        let mut to_address = self.address_list[idx].clone();
-
-        // ensure not to self
-        loop {
-            if from_account == &to_address {
-                let idx = rand::random::<usize>() % self.address_list.len();
-                to_address = self.address_list[idx].clone();
-            } else {
-                break;
-            }
-        }
+        let to_address = self.address_pool.select_address(from_account);
 
         // build ERC20 transfer call
         let transfer_call = IERC20::transferCall {
-            to: *to_address.as_ref(),
+            to: to_address,
             amount: self.transfer_amount,
         };
 

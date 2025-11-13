@@ -16,13 +16,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
-    actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
+    actors::{Monitor, RegisterTxnPlan, consumer::Consumer, producer::Producer},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        constructor::FaucetTreePlanBuilder,
-        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
-        PlanBuilder, TxnPlan,
+        PlanBuilder, TxnPlan, addr_pool::{AddressPool, RandomAddressPool}, constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}
     },
     util::gen_account::AccountGenerator,
 };
@@ -163,7 +161,7 @@ async fn test_uniswap(
 }
 
 async fn test_erc20_transfer(
-    account_addresses: Arc<Vec<Arc<Address>>>,
+    address_pool: Arc<dyn AddressPool>,
     chain_id: u64,
     contract_config: ContractConfig,
     producer: &Addr<Producer>,
@@ -184,7 +182,7 @@ async fn test_erc20_transfer(
             chain_id,
             contract_config.get_all_token_addresses().clone(),
             U256::from(1000),
-            account_addresses.clone(),
+            address_pool.clone(),
             tps,
         );
         let _rx = run_plan(erc20_transfer, producer).await?;
@@ -373,9 +371,10 @@ async fn main() -> Result<()> {
         )
         .await?;
     } else {
+        let address_pool = Arc::new(RandomAddressPool::new(account_addresses.clone()));
         info!("bench erc20 transfer");
         test_erc20_transfer(
-            account_addresses,
+            address_pool,
             chain_id,
             contract_config,
             &producer,
