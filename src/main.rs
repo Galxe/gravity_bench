@@ -290,7 +290,7 @@ async fn main() -> Result<()> {
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     info!("Initializing Faucet constructor...");
-    let mut start_nonce = 1;
+    let mut start_nonce = contract_config.get_all_token().len() as u64;
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
         benchmark_config.faucet.fauce_eth_balance,
