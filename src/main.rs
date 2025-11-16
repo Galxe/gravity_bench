@@ -16,14 +16,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
-    actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
+    actors::{Monitor, RegisterTxnPlan, consumer::Consumer, producer::Producer},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        addr_pool::{managed_address_pool::RandomAddressPool, AddressPool},
-        constructor::FaucetTreePlanBuilder,
-        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
-        PlanBuilder, TxnPlan,
+        PlanBuilder, TxnPlan, addr_pool::{AddressPool, weighted_address_pool::WeightedAddressPool}, constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}
     },
     util::gen_account::AccountGenerator,
 };
@@ -285,7 +282,7 @@ async fn main() -> Result<()> {
     )
     .start();
     let address_pool: Arc<dyn AddressPool> =
-        Arc::new(RandomAddressPool::new(accounts.clone()));
+        Arc::new(WeightedAddressPool::new(accounts.clone()));
 
     let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()

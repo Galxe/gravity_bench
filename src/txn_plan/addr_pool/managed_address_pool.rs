@@ -17,6 +17,7 @@ pub struct RandomAddressPool {
 }
 
 impl RandomAddressPool {
+    #[allow(unused)]
     pub fn new(
         account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
     ) -> Self {
