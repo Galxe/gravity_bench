@@ -2,7 +2,6 @@
 //! to be sent to the blockchain.
 
 pub mod addr_pool;
-pub mod address_pool;
 pub mod constructor;
 pub mod faucet_plan;
 pub mod faucet_txn_builder;
