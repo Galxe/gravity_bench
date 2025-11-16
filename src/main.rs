@@ -284,9 +284,8 @@ async fn main() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let nonce_map = init_nonce(&accounts, eth_clients[0].clone(), args.recover).await;
     let address_pool: Arc<dyn AddressPool> =
-        Arc::new(ManagedAddressPool::new(accounts.clone(), nonce_map));
+        Arc::new(ManagedAddressPool::new(accounts.clone()));
 
     let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()
@@ -389,14 +388,4 @@ async fn main() -> Result<()> {
         .await?;
     }
     Ok(())
-}
-
-async fn init_nonce(
-    accounts: &HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-
-    _eth_client: Arc<EthHttpCli>,
-    _recover: bool,
-) -> HashMap<Arc<Address>, u32> {
-    let nonce_map = HashMap::with_capacity(accounts.len());
-    nonce_map
 }

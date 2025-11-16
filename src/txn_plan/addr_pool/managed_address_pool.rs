@@ -19,15 +19,15 @@ pub struct ManagedAddressPool {
 impl ManagedAddressPool {
     pub fn new(
         account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-        account_nonce: HashMap<Arc<Address>, u32>,
     ) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
         let all_account_addresses: Vec<Arc<Address>> = account_signers.keys().cloned().collect();
         for (addr, signer) in account_signers.iter() {
-            let nonce = account_nonce.get(addr).unwrap_or(&0);
-            account_status.insert(addr.clone(), *nonce);
-            ready_accounts.push((signer.clone(), addr.clone(), *nonce));
+            // assume all address start from nonce, this is correct beacause a nonce too low error will trigger correct nonce
+            let nonce = 0;
+            account_status.insert(addr.clone(), nonce);
+            ready_accounts.push((signer.clone(), addr.clone(), nonce));
         }
 
         let inner = Inner {
