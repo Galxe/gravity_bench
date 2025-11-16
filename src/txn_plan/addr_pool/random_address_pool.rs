@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::txn_plan::addr_pool::AddressPool;
 use alloy::primitives::Address;
 
+#[derive(Debug, Clone)]
 pub struct RandomAddressPool {
     addresses: Arc<Vec<Arc<Address>>>,
 }
@@ -14,7 +15,7 @@ impl RandomAddressPool {
 }
 
 impl AddressPool for RandomAddressPool {
-    fn select_address(&self, excluded: &Address) -> Address {
+    fn pick_to_address(&self, excluded: &Address) -> Address {
         // random select a receiver address, ensure not to self
         loop {
             let idx = rand::random::<usize>() % self.addresses.len();
@@ -25,11 +26,16 @@ impl AddressPool for RandomAddressPool {
         }
     }
 
+    fn pick_from_address(&self) -> Address {
+        let idx = rand::random::<usize>() % self.addresses.len();
+        self.addresses[idx].as_ref().clone()
+    }
+
     fn lock_address(&self, _address: Address) {
         // Not implemented for this pool type
     }
 
-    fn unlock_address(&self, _address: Address) {
+    fn unlock_address(&self, _address: Address, _nonce: u32) {
         // Not implemented for this pool type
     }
 }

@@ -8,10 +8,15 @@ use alloy::{
 use crate::{
     config::LiquidityPair,
     txn_plan::{
-        TxnPlan, addr_pool::{AddressPool, RandomAddressPool}, constructor::{
+        addr_pool::AddressPool,
+        constructor::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
             SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
-        }, faucet_txn_builder::FaucetTxnBuilder, plan::ManyToOnePlan, traits::PlanExecutionMode
+        },
+        faucet_txn_builder::FaucetTxnBuilder,
+        plan::ManyToOnePlan,
+        traits::PlanExecutionMode,
+        TxnPlan,
     },
 };
 
@@ -33,14 +38,14 @@ impl PlanBuilder {
         chain_id: u64,
         amount_in: U256,
         token_list: Vec<LiquidityPair>,
-        address_list: Arc<Vec<Arc<Address>>>,
+        address_pool: Arc<dyn AddressPool>,
         router_address: Address,
         size: usize,
     ) -> Box<dyn TxnPlan> {
         let constructor = SwapTokenToTokenConstructor::new(
             token_list,
             chain_id,
-            address_list,
+            address_pool,
             amount_in,
             router_address,
         );
@@ -101,7 +106,7 @@ impl PlanBuilder {
         chain_id: u64,
         token_list: Vec<Address>,
         transfer_amount: U256,
-        address_pool: Arc<dyn AddressPool + Send + Sync>,
+        address_pool: Arc<dyn AddressPool>,
         size: usize,
     ) -> Box<dyn TxnPlan> {
         let constructor =

@@ -44,7 +44,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // random select a receiver address, ensure not to self
-        let to_address = self.address_pool.select_address(from_account);
+        let to_address = self.address_pool.select_receiver(from_account);
 
         // build ERC20 transfer call
         let transfer_call = IERC20::transferCall {

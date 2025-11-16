@@ -14,9 +14,8 @@ use crate::actors::monitor::{
     Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, SubmissionResult,
     UpdateSubmissionResult,
 };
-use crate::actors::producer::account_mgr::AccountManager;
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
-use crate::txn_plan::{PlanExecutionMode, PlanId, TxnPlan};
+use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
 
 use super::messages::RegisterTxnPlan;
 
@@ -62,7 +61,7 @@ impl ProducerState {
 /// The main TxnProducer actor, responsible for executing transaction plans sequentially.
 pub struct Producer {
     /// Manages account nonces and readiness.
-    account_manager: Arc<Mutex<AccountManager>>,
+    address_pool: Arc<dyn AddressPool>,
     /// The current state of the producer (Running or Paused).
     state: ProducerState,
 
@@ -84,8 +83,7 @@ pub struct Producer {
 
 impl Producer {
     pub fn new(
-        account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-        account_nonce: HashMap<Arc<Address>, u32>,
+        address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
     ) -> Result<Self, anyhow::Error> {
@@ -100,10 +98,7 @@ impl Producer {
                 success_txns: 0,
                 failed_txns: 0,
             },
-            account_manager: Arc::new(Mutex::new(AccountManager::new(
-                account_signers,
-                account_nonce,
-            ))),
+            address_pool,
             nonce_cache: Arc::new(DashMap::new()),
             monitor_addr,
             consumer_addr,
@@ -131,12 +126,11 @@ impl Producer {
     /// Checks if the required accounts for a given plan are ready.
     async fn check_plan_ready(
         plan_mode: &PlanExecutionMode,
-        account_manager: &Arc<Mutex<AccountManager>>,
+        address_pool: &Arc<dyn AddressPool>,
     ) -> bool {
-        let manager = account_manager.lock().await;
         match plan_mode {
-            PlanExecutionMode::Full => manager.is_full_ready(),
-            PlanExecutionMode::Partial(required_count) => manager.ready_len() >= *required_count,
+            PlanExecutionMode::Full => address_pool.is_full_ready(),
+            PlanExecutionMode::Partial(required_count) => address_pool.ready_len() >= *required_count,
         }
     }
 
@@ -145,7 +139,7 @@ impl Producer {
     async fn execute_plan(
         monitor_addr: Addr<Monitor>,
         consumer_addr: Addr<Consumer>,
-        account_manager: Arc<Mutex<AccountManager>>,
+        address_pool: Arc<dyn AddressPool>,
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
@@ -155,17 +149,14 @@ impl Producer {
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
-        let ready_accounts = {
-            let mut manager = account_manager.lock().await;
-            manager.fetch_ready_accounts(plan.size())
-        }; // Lock is released here
+        let ready_accounts =
+            address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
 
         let iterator = plan.as_mut().build_txns(ready_accounts)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {
-            let mut manager = account_manager.lock().await;
-            manager.resume_all_accounts();
+            address_pool.resume_all_accounts();
         }
         // must send to monitor before sending to consumer
         monitor_addr
@@ -237,9 +228,9 @@ impl Actor for Producer {
         self.monitor_addr.do_send(RegisterProducer {
             addr: ctx.address(),
         });
-        let account_manager = self.account_manager.clone();
+        let address_pool = self.address_pool.clone();
         async move {
-            let count = account_manager.lock().await.len();
+            let count = address_pool.len();
             tracing::info!("Producer started with {} accounts.", count);
         }
         .into_actor(self)
@@ -267,7 +258,7 @@ impl Handler<ExeFrontPlan> for Producer {
         // Pop the plan from the front of the queue to process it.
         let plan = self.plan_queue.pop_front().unwrap();
         self.stats.remain_plans_num -= 1;
-        let account_manager = self.account_manager.clone();
+        let address_pool = self.address_pool.clone();
         let monitor_addr = self.monitor_addr.clone();
         let consumer_addr = self.consumer_addr.clone();
         let self_addr = ctx.address();
@@ -278,7 +269,7 @@ impl Handler<ExeFrontPlan> for Producer {
             async move {
                 // Check if the plan is ready to be executed.
                 let is_ready =
-                    Self::check_plan_ready(plan.execution_mode(), &account_manager).await;
+                    Self::check_plan_ready(plan.execution_mode(), &address_pool).await;
 
                 if !is_ready {
                     // If not ready, return the plan so it can be put back at the front of the queue.
@@ -291,7 +282,7 @@ impl Handler<ExeFrontPlan> for Producer {
                 if let Err(e) = Self::execute_plan(
                     monitor_addr,
                     consumer_addr,
-                    account_manager,
+                    address_pool,
                     plan,
                     sending_txns,
                     state,
@@ -400,7 +391,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
     type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
-        let account_manager = self.account_manager.clone();
+        let address_pool = self.address_pool.clone();
         let account = msg.metadata.from_account.clone();
         self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
         match msg.result.as_ref() {
@@ -419,10 +410,9 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
-                let mut manager = account_manager.lock().await;
                 match msg.result.as_ref() {
                     SubmissionResult::Success(_) => {
-                        manager.unlock_next_nonce(account);
+                        address_pool.unlock_next_nonce(account);
                     }
                     SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                         tracing::debug!(
@@ -431,13 +421,13 @@ impl Handler<UpdateSubmissionResult> for Producer {
                             expect_nonce,
                             msg.metadata.nonce
                         );
-                        manager.unlock_correct_nonce(account, *expect_nonce as u32);
+                        address_pool.unlock_correct_nonce(account, *expect_nonce as u32);
                     }
                     SubmissionResult::ErrorWithRetry => {
-                        manager.retry_current_nonce(account);
+                        address_pool.retry_current_nonce(account);
                     }
                 }
-                ready_accounts.store(manager.ready_len() as u64, Ordering::Relaxed);
+                ready_accounts.store(address_pool.ready_len() as u64, Ordering::Relaxed);
             }
             .into_actor(self)
             .map(|_, act, ctx| {

@@ -16,11 +16,16 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
-    actors::{Monitor, RegisterTxnPlan, consumer::Consumer, producer::Producer},
+    actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        PlanBuilder, TxnPlan, addr_pool::{AddressPool, RandomAddressPool}, constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}
+        addr_pool::{managed_address_pool::ManagedAddressPool, AddressPool},
+        constructor::FaucetTreePlanBuilder,
+        faucet_txn_builder::{
+            Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder,
+        },
+        PlanBuilder, TxnPlan,
     },
     util::gen_account::AccountGenerator,
 };
@@ -116,7 +121,7 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
 
 #[allow(unused)]
 async fn test_uniswap(
-    account_addresses: Arc<Vec<Arc<Address>>>,
+    address_pool: Arc<dyn AddressPool>,
     chain_id: u64,
     contract_config: ContractConfig,
     producer: &Addr<Producer>,
@@ -150,7 +155,7 @@ async fn test_uniswap(
             chain_id,
             U256::from(1000),
             contract_config.get_liquidity_pairs().clone(),
-            account_addresses.clone(),
+            address_pool.clone(),
             contract_config.get_router_address().unwrap(),
             tps,
         );
@@ -282,7 +287,10 @@ async fn main() -> Result<()> {
     )
     .start();
     let nonce_map = init_nonce(&accounts, eth_clients[0].clone(), args.recover).await;
-    let producer = Producer::new(accounts.clone(), nonce_map, consumer, monitor)
+    let address_pool: Arc<dyn AddressPool> =
+        Arc::new(ManagedAddressPool::new(accounts.clone(), nonce_map));
+
+    let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()
         .start();
     let chain_id = benchmark_config.nodes[0].chain_id;
@@ -362,7 +370,7 @@ async fn main() -> Result<()> {
     if benchmark_config.enable_swap_token {
         info!("bench uniswap");
         test_uniswap(
-            account_addresses,
+            address_pool,
             chain_id,
             contract_config,
             &producer,
@@ -371,7 +379,6 @@ async fn main() -> Result<()> {
         )
         .await?;
     } else {
-        let address_pool = Arc::new(RandomAddressPool::new(account_addresses.clone()));
         info!("bench erc20 transfer");
         test_erc20_transfer(
             address_pool,
