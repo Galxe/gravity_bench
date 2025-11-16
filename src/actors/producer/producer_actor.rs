@@ -1,12 +1,10 @@
 use actix::prelude::*;
 use alloy::primitives::Address;
-use alloy::signers::local::PrivateKeySigner;
 use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
@@ -130,7 +128,9 @@ impl Producer {
     ) -> bool {
         match plan_mode {
             PlanExecutionMode::Full => address_pool.is_full_ready(),
-            PlanExecutionMode::Partial(required_count) => address_pool.ready_len() >= *required_count,
+            PlanExecutionMode::Partial(required_count) => {
+                address_pool.ready_len() >= *required_count
+            }
         }
     }
 
@@ -268,8 +268,7 @@ impl Handler<ExeFrontPlan> for Producer {
         Box::pin(
             async move {
                 // Check if the plan is ready to be executed.
-                let is_ready =
-                    Self::check_plan_ready(plan.execution_mode(), &address_pool).await;
+                let is_ready = Self::check_plan_ready(plan.execution_mode(), &address_pool).await;
 
                 if !is_ready {
                     // If not ready, return the plan so it can be put back at the front of the queue.

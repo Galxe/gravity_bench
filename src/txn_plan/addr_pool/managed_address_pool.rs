@@ -44,10 +44,7 @@ impl ManagedAddressPool {
 }
 
 impl AddressPool for ManagedAddressPool {
-    fn fetch_senders(
-        &self,
-        count: usize,
-    ) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)> {
+    fn fetch_senders(&self, count: usize) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)> {
         let mut inner = self.inner.lock();
         if count < inner.ready_accounts.len() {
             let remaining = inner.ready_accounts.split_off(count);
@@ -65,11 +62,7 @@ impl AddressPool for ManagedAddressPool {
             *status += 1;
             let signer = inner.account_signers.get(&account).unwrap().clone();
             let status = *inner.account_status.get(&account).unwrap();
-            inner.ready_accounts.push((
-                signer,
-                account.clone(),
-                status,
-            ));
+            inner.ready_accounts.push((signer, account.clone(), status));
         }
     }
 
@@ -79,11 +72,7 @@ impl AddressPool for ManagedAddressPool {
             *status = nonce;
             let status = *status;
             let signer = inner.account_signers.get(&account).unwrap().clone();
-            inner.ready_accounts.push((
-                signer,
-                account.clone(),
-                status,
-            ));
+            inner.ready_accounts.push((signer, account.clone(), status));
         }
     }
 
@@ -92,21 +81,21 @@ impl AddressPool for ManagedAddressPool {
         if inner.account_status.get_mut(&account).is_some() {
             let signer = inner.account_signers.get(&account).unwrap().clone();
             let status = *inner.account_status.get(&account).unwrap();
-            inner.ready_accounts.push((
-                signer,
-                account.clone(),
-                status,
-            ));
+            inner.ready_accounts.push((signer, account.clone(), status));
         }
     }
 
     fn resume_all_accounts(&self) {
         let mut inner = self.inner.lock();
-        inner.ready_accounts = inner.all_account_addresses.iter().map(|account| {
-            let signer = inner.account_signers.get(account).unwrap().clone();
-            let status = *inner.account_status.get(account).unwrap();
-            (signer, account.clone(), status)
-        }).collect();
+        inner.ready_accounts = inner
+            .all_account_addresses
+            .iter()
+            .map(|account| {
+                let signer = inner.account_signers.get(account).unwrap().clone();
+                let status = *inner.account_status.get(account).unwrap();
+                (signer, account.clone(), status)
+            })
+            .collect();
     }
 
     fn is_full_ready(&self) -> bool {

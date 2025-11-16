@@ -7,10 +7,7 @@ pub mod managed_address_pool;
 pub trait AddressPool: Send + Sync {
     /// Fetches a batch of ready sender accounts based on the internal sampling strategy.
     /// This operation should internally lock the accounts to prevent concurrent use.
-    fn fetch_senders(
-        &self,
-        count: usize,
-    ) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>;
+    fn fetch_senders(&self, count: usize) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>;
 
     /// Unlocks an account after a successful transaction and increments its nonce.
     fn unlock_next_nonce(&self, account: Arc<Address>);

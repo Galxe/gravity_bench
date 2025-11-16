@@ -22,9 +22,7 @@ use crate::{
     txn_plan::{
         addr_pool::{managed_address_pool::ManagedAddressPool, AddressPool},
         constructor::FaucetTreePlanBuilder,
-        faucet_txn_builder::{
-            Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder,
-        },
+        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
     },
     util::gen_account::AccountGenerator,
