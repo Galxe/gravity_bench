@@ -12,11 +12,11 @@ struct Inner {
     all_account_addresses: Vec<Arc<Address>>,
 }
 
-pub struct ManagedAddressPool {
+pub struct RandomAddressPool {
     inner: Mutex<Inner>,
 }
 
-impl ManagedAddressPool {
+impl RandomAddressPool {
     pub fn new(
         account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
     ) -> Self {
@@ -43,7 +43,7 @@ impl ManagedAddressPool {
     }
 }
 
-impl AddressPool for ManagedAddressPool {
+impl AddressPool for RandomAddressPool {
     fn fetch_senders(&self, count: usize) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)> {
         let mut inner = self.inner.lock();
         if count < inner.ready_accounts.len() {

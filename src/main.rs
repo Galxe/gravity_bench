@@ -20,7 +20,7 @@ use crate::{
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        addr_pool::{managed_address_pool::ManagedAddressPool, AddressPool},
+        addr_pool::{managed_address_pool::RandomAddressPool, AddressPool},
         constructor::FaucetTreePlanBuilder,
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
@@ -285,7 +285,7 @@ async fn main() -> Result<()> {
     )
     .start();
     let address_pool: Arc<dyn AddressPool> =
-        Arc::new(ManagedAddressPool::new(accounts.clone()));
+        Arc::new(RandomAddressPool::new(accounts.clone()));
 
     let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()
