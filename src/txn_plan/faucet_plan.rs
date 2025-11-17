@@ -118,49 +118,59 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
         let level = self.level;
         let is_final_level = self.is_final_level;
         let txn_builder = self.txn_builder.clone();
-
         let handle = tokio::task::spawn_blocking(move || {
             senders
-                .into_par_iter()
+                .chunks(1024)
                 .enumerate()
-                .for_each(|(sender_index, sender_signer)| {
-                    let start_index = sender_index * degree;
-                    let end_index = (start_index + degree).min(final_recipients.len());
+                .for_each(|(chunk_index, chunk)| {
+                    chunk
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(sender_index, sender_signer)| {
+                            let start_index = chunk_index * 1024 + sender_index * degree;
+                            let end_index = (start_index + degree).min(final_recipients.len());
 
-                    for i in start_index..end_index {
-                        let (to_address, value) = if is_final_level {
-                            let to = final_recipients[i].clone();
-                            let val = amount_per_recipient;
-                            (to, val)
-                        } else {
-                            let to = account_levels[level][i].address();
-                            let val = intermediate_funding_amounts[level];
-                            (Arc::new(to), val)
-                        };
+                            for i in start_index..end_index {
+                                let (to_address, value) = if is_final_level {
+                                    let to = final_recipients[i].clone();
+                                    let val = amount_per_recipient;
+                                    (to, val)
+                                } else {
+                                    let to = account_levels[level][i].address();
+                                    let val = intermediate_funding_amounts[level];
+                                    (Arc::new(to), val)
+                                };
 
-                        let nonce_map_guard = nonce_map.lock().unwrap();
-                        let nonce = nonce_map_guard
-                            .get(&sender_signer.address())
-                            .unwrap()
-                            .fetch_add(1, Ordering::Relaxed);
-                        let tx_request =
-                            txn_builder.build_faucet_txn(*to_address, value, nonce, chain_id);
-                        let tx_envelope =
-                            TxnBuilder::build_and_sign_transaction(tx_request, &sender_signer)
+                                let nonce_map_guard = nonce_map.lock().unwrap();
+                                let nonce = nonce_map_guard
+                                    .get(&sender_signer.address())
+                                    .unwrap()
+                                    .fetch_add(1, Ordering::Relaxed);
+                                let tx_request = txn_builder.build_faucet_txn(
+                                    *to_address,
+                                    value,
+                                    nonce,
+                                    chain_id,
+                                );
+                                let tx_envelope = TxnBuilder::build_and_sign_transaction(
+                                    tx_request,
+                                    &sender_signer,
+                                )
                                 .unwrap();
-                        let metadata = Arc::new(TxnMetadata {
-                            from_account: Arc::new(sender_signer.address()),
-                            nonce,
-                            txn_id: Uuid::new_v4(),
-                            plan_id: plan_id.clone(),
-                        });
+                                let metadata = Arc::new(TxnMetadata {
+                                    from_account: Arc::new(sender_signer.address()),
+                                    nonce,
+                                    txn_id: Uuid::new_v4(),
+                                    plan_id: plan_id.clone(),
+                                });
 
-                        tx.send(SignedTxnWithMetadata {
-                            bytes: tx_envelope.encoded_2718(),
-                            metadata,
+                                tx.send(SignedTxnWithMetadata {
+                                    bytes: tx_envelope.encoded_2718(),
+                                    metadata,
+                                })
+                                .unwrap();
+                            }
                         })
-                        .unwrap();
-                    }
                 });
             drop(tx);
         });
