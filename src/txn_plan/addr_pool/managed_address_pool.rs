@@ -18,9 +18,7 @@ pub struct RandomAddressPool {
 
 impl RandomAddressPool {
     #[allow(unused)]
-    pub fn new(
-        account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    ) -> Self {
+    pub fn new(account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
         let all_account_addresses: Vec<Arc<Address>> = account_signers.keys().cloned().collect();

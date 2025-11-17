@@ -31,10 +31,9 @@ pub struct WeightedAddressPool {
 }
 
 impl WeightedAddressPool {
-    pub fn new(
-        account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    ) -> Self {
-        let mut all_account_addresses: Vec<Arc<Address>> = account_signers.keys().cloned().collect();
+    pub fn new(account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>) -> Self {
+        let mut all_account_addresses: Vec<Arc<Address>> =
+            account_signers.keys().cloned().collect();
         // Shuffle for random distribution
         all_account_addresses.shuffle(&mut rand::thread_rng());
 
@@ -144,12 +143,13 @@ impl AddressPool for WeightedAddressPool {
                 let remaining = remaining - normal_fill;
 
                 if remaining > 0 {
-                    let long_tail_fill = std::cmp::min(remaining, inner.long_tail_ready_accounts.len());
+                    let long_tail_fill =
+                        std::cmp::min(remaining, inner.long_tail_ready_accounts.len());
                     result.extend(inner.long_tail_ready_accounts.drain(..long_tail_fill));
                 }
             }
         }
-        
+
         result
     }
 
