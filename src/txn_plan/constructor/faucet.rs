@@ -55,6 +55,8 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         }
         let total_levels = Self::calculate_levels(total_accounts, degree);
 
+        let round_total_accounts_num = degree.pow(total_levels as u32);
+
         let degree_u256 = U256::from(degree);
         let gas_cost_per_txn = U256::from(GAS_PRICE);
 
@@ -66,7 +68,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             for i in 0..num_intermediate_levels {
                 intermediate_txns += degree.pow(i as u32 + 1);
             }
-            let final_txns = total_accounts;
+            let final_txns = round_total_accounts_num;
             let total_txns = intermediate_txns + final_txns;
             let total_gas_cost = U256::from(total_txns) * gas_cost_per_txn;
 
@@ -75,7 +77,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let amount_for_leaves = faucet_balance - total_cost;
 
             let amount_per_recipient = if total_accounts > 0 {
-                amount_for_leaves / U256::from(total_accounts)
+                amount_for_leaves / U256::from(round_total_accounts_num)
             } else {
                 panic!("Total accounts is 0");
             };
