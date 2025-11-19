@@ -83,7 +83,7 @@ impl TxnBuilder {
             .with_chain_id(chain_id)
             .with_max_priority_fee_per_gas(100_000_000)
             .with_max_fee_per_gas(100_000_000)
-            .with_gas_limit(21_000);
+            .with_gas_limit(100_000);
 
         Ok(tx_request)
     }
@@ -102,7 +102,7 @@ impl TxnBuilder {
             .with_chain_id(chain_id)
             .with_max_priority_fee_per_gas(100_000_000)
             .with_max_fee_per_gas(100_000_000)
-            .with_gas_limit(21_000);
+            .with_gas_limit(100_000);
 
         Ok(tx_request)
     }
