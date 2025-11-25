@@ -20,7 +20,7 @@ use crate::{
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        addr_pool::{weighted_address_pool::WeightedAddressPool, AddressPool},
+        addr_pool::AddressPool,
         constructor::FaucetTreePlanBuilder,
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
@@ -284,7 +284,7 @@ async fn main() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let address_pool: Arc<dyn AddressPool> = Arc::new(WeightedAddressPool::new(accounts.clone()));
+    let address_pool: Arc<dyn AddressPool> = Arc::new(txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()));
 
     let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()

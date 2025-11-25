@@ -3,6 +3,7 @@ use std::sync::Arc;
 use alloy::{primitives::Address, signers::local::PrivateKeySigner};
 
 pub mod managed_address_pool;
+#[allow(unused)]
 pub mod weighted_address_pool;
 
 pub trait AddressPool: Send + Sync {
