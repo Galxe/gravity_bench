@@ -20,7 +20,7 @@ use crate::{
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        addr_pool::{weighted_address_pool::WeightedAddressPool, AddressPool},
+        addr_pool::AddressPool,
         constructor::FaucetTreePlanBuilder,
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,

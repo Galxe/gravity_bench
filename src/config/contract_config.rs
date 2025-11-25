@@ -70,6 +70,7 @@ pub struct MinimalAbis {
     erc20: Vec<serde_json::Value>,
 }
 
+#[allow(unused)]
 #[derive(Debug, Deserialize)]
 struct AbiInput {
     #[serde(rename = "internalType")]
