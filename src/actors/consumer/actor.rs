@@ -319,10 +319,12 @@ impl Consumer {
 
         // --- Final handling after all retries failed ---
         error!(
-            "Txn {:?} failed after {} retries. Last error: {:?}",
+            "Txn {:?} failed after {} retries. Last error: {:?}, account: {:?}, nonce: {:?}",
             metadata.txn_id,
             MAX_RETRIES,
-            last_error.map(|e| e.to_string())
+            last_error.map(|e| e.to_string()),
+            metadata.from_account,
+            metadata.nonce
         );
 
         monitor_addr.do_send(UpdateSubmissionResult {
