@@ -127,7 +127,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                         .into_par_iter()
                         .enumerate()
                         .for_each(|(sender_index, sender_signer)| {
-                            let start_index = chunk_index * 1024 + sender_index * degree;
+                            let start_index = (chunk_index * 1024 + sender_index) * degree;
                             let end_index = (start_index + degree).min(final_recipients.len());
 
                             for i in start_index..end_index {
