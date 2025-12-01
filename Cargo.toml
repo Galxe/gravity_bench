@@ -54,8 +54,7 @@ parking_lot = "0.12.5"
 dhat = {version = "0.3"}
 
 [profile.memprof]
-debug = 1
-inherit = "release"
+inherits = "release"
 
 
 [features]
