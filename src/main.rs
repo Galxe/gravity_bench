@@ -204,8 +204,10 @@ fn run_command(command: &str) -> Result<Output> {
     }
 }
 
-#[actix::main]
-async fn main() -> Result<()> {
+
+async fn start_bench() -> Result<()> {
+
+    
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
@@ -385,6 +387,27 @@ async fn main() -> Result<()> {
             duration_secs,
         )
         .await?;
+    }
+    Ok(())
+}
+
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[actix::main]
+async fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+    let res = async { start_bench().await };
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
+        println!("Received Ctrl+C, saving heap profile...");
+    };
+    tokio::select! {
+        _ = res => {},
+        _ = ctrl_c => {},
     }
     Ok(())
 }
