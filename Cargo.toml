@@ -55,6 +55,7 @@ dhat = {version = "0.3"}
 
 [profile.memprof]
 debug = 1
+inherit = "release"
 
 
 [features]
