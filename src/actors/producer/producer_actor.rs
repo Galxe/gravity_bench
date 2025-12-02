@@ -14,6 +14,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
+use crate::util::gen_account::AccountGenerator;
 
 use super::messages::RegisterTxnPlan;
 
@@ -84,7 +85,12 @@ impl Producer {
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
+        account_generator: &AccountGenerator,   
     ) -> Result<Self, anyhow::Error> {
+        let nonce_cache = Arc::new(DashMap::new());
+        for (account, nonce) in account_generator.accouts_nonce_iter() {
+            nonce_cache.insert(Arc::new(account.address()), nonce.load(Ordering::Relaxed) as u32);
+        }
         Ok(Self {
             state: ProducerState::running(),
             stats: ProducerStats {
@@ -97,7 +103,7 @@ impl Producer {
                 failed_txns: 0,
             },
             address_pool,
-            nonce_cache: Arc::new(DashMap::new()),
+            nonce_cache,
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),

@@ -289,9 +289,7 @@ async fn start_bench() -> Result<()> {
         txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()),
     );
 
-    let producer = Producer::new(address_pool.clone(), consumer, monitor)
-        .unwrap()
-        .start();
+    
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     info!("Initializing Faucet constructor...");
@@ -313,6 +311,10 @@ async fn start_bench() -> Result<()> {
     if args.recover {
         init_nonce(&accout_generator, eth_clients[0].clone()).await;
     }
+
+    let producer = Producer::new(address_pool.clone(), consumer, monitor, &accout_generator)
+        .unwrap()
+        .start();
     execute_faucet_distribution(
         eth_faucet_builder,
         chain_id,
