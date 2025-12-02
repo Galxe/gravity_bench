@@ -45,11 +45,9 @@ impl RandomAddressPool {
 impl AddressPool for RandomAddressPool {
     fn fetch_senders(&self, count: usize) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)> {
         let mut inner = self.inner.lock();
-        if count < inner.ready_accounts.len() {
-            let remaining = inner.ready_accounts.split_off(count);
-            let result = std::mem::take(&mut inner.ready_accounts);
-            inner.ready_accounts = remaining;
-            result
+        let len = inner.ready_accounts.len();
+        if count < len {
+            inner.ready_accounts.split_off(len - count)
         } else {
             std::mem::take(&mut inner.ready_accounts)
         }
