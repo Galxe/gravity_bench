@@ -5,10 +5,12 @@ use alloy::{
 };
 use anyhow::Result;
 use clap::Parser;
+use futures::stream::{self, StreamExt};
 use std::{
     collections::HashMap,
     process::{Command, Output},
     str::FromStr,
+    sync::atomic::Ordering,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -308,7 +310,9 @@ async fn start_bench() -> Result<()> {
     )
     .await
     .unwrap();
-    init_nonce(&mut accout_generator, eth_clients[0].clone());
+    if args.recover {
+        init_nonce(&accout_generator, eth_clients[0].clone()).await;
+    }
     execute_faucet_distribution(
         eth_faucet_builder,
         chain_id,
@@ -391,11 +395,20 @@ async fn start_bench() -> Result<()> {
     Ok(())
 }
 
-async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<EthHttpCli>) {
-    for (account, nonce) in accout_generator.accouts_nonce_mut() {
-        let init_nonce = eth_client.get_nonce(account.address()).await.unwrap();
-        *nonce = init_nonce;
-    }
+async fn init_nonce(accout_generator: &AccountGenerator, eth_client: Arc<EthHttpCli>) {
+    let tasks = accout_generator.accouts_nonce_iter().map(|(account, nonce)| {
+        let client = eth_client.clone();
+        let addr = account.address();
+        async move {
+            let init_nonce = client.get_nonce(addr).await.unwrap();
+            nonce.store(init_nonce, Ordering::Relaxed);
+        }
+    });
+
+    stream::iter(tasks)
+        .buffer_unordered(1024)
+        .collect::<Vec<_>>()
+        .await;
 }
 
 #[cfg(feature = "dhat-heap")]

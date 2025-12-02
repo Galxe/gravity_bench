@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{atomic::AtomicU64, Arc}};
 
 use alloy::{
     primitives::{keccak256, Address},
@@ -10,7 +10,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 #[derive(Default)]
 pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
-    init_nonces: Vec<u64>,
+    init_nonces: Vec<Arc<AtomicU64>>,
 }
 
 impl AccountGenerator {
@@ -21,15 +21,15 @@ impl AccountGenerator {
         }
     }
 
-    pub fn accouts_nonce_mut(&mut self) -> impl Iterator<Item = (&PrivateKeySigner, &mut u64)> {
-        self.accouts.iter().zip(self.init_nonces.iter_mut())
+    pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&PrivateKeySigner, Arc<AtomicU64>)> {
+        self.accouts.iter().zip(self.init_nonces.iter().cloned())
     }
 
     pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
         let start_index = start_index.max(self.accouts.len() as u64);
         let res = self.gen_deterministic_accounts(start_index, start_index + size);
         self.accouts.extend(res);
-        self.init_nonces.extend(vec![0; size as usize]);
+        self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
         let mut res = HashMap::new();
         for i in 0..size {
             let signer = self.accouts[(start_index + i) as usize].clone();
