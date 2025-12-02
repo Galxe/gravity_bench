@@ -7,9 +7,13 @@ use alloy::{
 use anyhow::{Context, Result};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountId(u64);
+
 #[derive(Default)]
 pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
+    accout_to_id: HashMap<Address, AccountId>,
     init_nonces: Vec<Arc<AtomicU64>>,
 }
 
@@ -17,6 +21,7 @@ impl AccountGenerator {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             accouts: Vec::with_capacity(capacity),
+            accout_to_id: HashMap::with_capacity(capacity),
             init_nonces: Vec::with_capacity(capacity),
         }
     }
@@ -30,6 +35,9 @@ impl AccountGenerator {
         let res = self.gen_deterministic_accounts(start_index, start_index + size);
         self.accouts.extend(res);
         self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
+        for i in 0..size {
+            self.accout_to_id.insert(self.accouts[(start_index + i) as usize].address(), AccountId(start_index + i));
+        }
         let mut res = HashMap::new();
         for i in 0..size {
             let signer = self.accouts[(start_index + i) as usize].clone();
