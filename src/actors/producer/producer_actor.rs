@@ -1,6 +1,7 @@
 use actix::prelude::*;
 use alloy::primitives::Address;
 use dashmap::DashMap;
+use tokio::sync::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -81,13 +82,14 @@ pub struct Producer {
 }
 
 impl Producer {
-    pub fn new(
+    pub async fn new(
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
-        account_generator: &AccountGenerator,   
+        account_generator: Arc<RwLock<AccountGenerator>>,   
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
+        let account_generator = account_generator.read().await;
         for (account, nonce) in account_generator.accouts_nonce_iter() {
             nonce_cache.insert(Arc::new(account.address()), nonce.load(Ordering::Relaxed) as u32);
         }

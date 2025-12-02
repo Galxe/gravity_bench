@@ -27,6 +27,7 @@ const DEFAULT_CONCURRENCY_LIMIT: usize = 256;
 
 pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     id: PlanId,
+    account_init_nonce: Arc<HashMap<Address, u64>>,
     execution_mode: PlanExecutionMode,
     chain_id: u64,
     level: usize,
@@ -48,6 +49,7 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
     pub fn new(
         chain_id: u64,
         level: usize,
+        account_init_nonce: Arc<HashMap<Address, u64>>,
         senders: Vec<Arc<PrivateKeySigner>>,
         final_recipients: Arc<Vec<Arc<Address>>>,
         account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
@@ -65,6 +67,7 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
         };
         Self {
             id,
+            account_init_nonce,
             execution_mode,
             chain_id,
             level,
@@ -118,6 +121,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
         let level = self.level;
         let is_final_level = self.is_final_level;
         let txn_builder = self.txn_builder.clone();
+        let account_init_nonce = self.account_init_nonce.clone();
         let handle = tokio::task::spawn_blocking(move || {
             senders
                 .chunks(1024)
@@ -146,6 +150,10 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     .get(&sender_signer.address())
                                     .unwrap()
                                     .fetch_add(1, Ordering::Relaxed);
+                                let init_nonce = account_init_nonce.get(&sender_signer.address()).unwrap_or(&0);
+                                if *init_nonce >= nonce {
+                                    continue;
+                                }
                                 let tx_request = txn_builder.build_faucet_txn(
                                     *to_address,
                                     value,

@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
+use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader}, sync::RwLock};
 use tracing::{info, Level};
 
 use crate::{
@@ -87,6 +87,7 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
     producer: &Addr<Producer>,
     faucet_name: &str,
     wait_duration_secs: u64,
+    init_nonce_map: Arc<HashMap<Address, u64>>,
 ) -> Result<()> {
     let total_faucet_levels = faucet_builder.total_levels();
     info!(
@@ -100,7 +101,7 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
             faucet_name, level
         );
 
-        let faucet_level_plan = faucet_builder.create_plan_for_level(level, chain_id);
+        let faucet_level_plan = faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
 
         let rx = run_plan(faucet_level_plan, producer).await?;
         rx.await??;
@@ -245,8 +246,10 @@ async fn start_bench() -> Result<()> {
         contract_config
     };
 
-    let mut accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts * 2);
+    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts * 2);
     let accounts = accout_generator
+        .write()
+        .await
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
     let account_addresses = Arc::new(
@@ -304,15 +307,18 @@ async fn start_bench() -> Result<()> {
         U256::from(benchmark_config.num_tokens)
             * U256::from(21000)
             * U256::from(1000_000_000_000u64),
-        &mut accout_generator,
+        accout_generator.clone(),
     )
     .await
     .unwrap();
     if args.recover {
-        init_nonce(&accout_generator, eth_clients[0].clone()).await;
+        init_nonce(accout_generator.clone(), eth_clients[0].clone()).await;
     }
+    let init_nonce_map = 
+        accout_generator.read().await.init_nonce_map();
 
-    let producer = Producer::new(address_pool.clone(), consumer, monitor, &accout_generator)
+    let producer = Producer::new(address_pool.clone(), consumer, monitor, accout_generator.clone())
+        .await
         .unwrap()
         .start();
     execute_faucet_distribution(
@@ -321,6 +327,7 @@ async fn start_bench() -> Result<()> {
         &producer,
         "ETH",
         benchmark_config.faucet.wait_duration_secs,
+        init_nonce_map.clone(),
     )
     .await?;
 
@@ -340,7 +347,7 @@ async fn start_bench() -> Result<()> {
             account_addresses.clone(),
             Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
             U256::ZERO,
-            &mut accout_generator,
+            accout_generator.clone(),
         )
         .await
         .unwrap();
@@ -351,6 +358,7 @@ async fn start_bench() -> Result<()> {
             &producer,
             &format!("Token {}", token.symbol),
             benchmark_config.faucet.wait_duration_secs,
+            init_nonce_map.clone(),
         )
         .await?;
     }
@@ -397,7 +405,8 @@ async fn start_bench() -> Result<()> {
     Ok(())
 }
 
-async fn init_nonce(accout_generator: &AccountGenerator, eth_client: Arc<EthHttpCli>) {
+async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client: Arc<EthHttpCli>) {
+    let accout_generator = accout_generator.read().await;
     let tasks = accout_generator.accouts_nonce_iter().map(|(account, nonce)| {
         let client = eth_client.clone();
         let addr = account.address();

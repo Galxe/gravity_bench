@@ -4,20 +4,16 @@ use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
+use tokio::sync::RwLock;
 
 use crate::{
     config::LiquidityPair,
     txn_plan::{
-        addr_pool::AddressPool,
-        constructor::{
+        TxnPlan, addr_pool::AddressPool, constructor::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
             SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
-        },
-        faucet_txn_builder::FaucetTxnBuilder,
-        plan::ManyToOnePlan,
-        traits::PlanExecutionMode,
-        TxnPlan,
-    },
+        }, faucet_txn_builder::FaucetTxnBuilder, plan::ManyToOnePlan, traits::PlanExecutionMode
+    }, util::gen_account::AccountGenerator,
 };
 
 /// Plan builder - Provides convenient APIs to create various types of transaction plans
@@ -84,7 +80,7 @@ impl PlanBuilder {
         total_accounts: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
-        account_generator: &mut crate::util::gen_account::AccountGenerator,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(

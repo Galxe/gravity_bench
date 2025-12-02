@@ -6,11 +6,11 @@ use alloy::{
 };
 use anyhow::{Context, Result};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AccountId(u64);
 
-#[derive(Default)]
 pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
     accout_to_id: HashMap<Address, AccountId>,
@@ -18,12 +18,20 @@ pub struct AccountGenerator {
 }
 
 impl AccountGenerator {
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
+    pub fn with_capacity(capacity: usize) -> Arc<RwLock<Self>> {
+        Arc::new(RwLock::new(   Self {
             accouts: Vec::with_capacity(capacity),
             accout_to_id: HashMap::with_capacity(capacity),
             init_nonces: Vec::with_capacity(capacity),
+        }))
+    }
+
+    pub fn init_nonce_map(&self) -> Arc<HashMap<Address, u64>> {
+        let mut map = HashMap::new();
+        for (account, id) in self.accout_to_id.iter() {
+            map.insert(account.clone(), id.0);
         }
+        Arc::new(map)
     }
 
     pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&PrivateKeySigner, Arc<AtomicU64>)> {

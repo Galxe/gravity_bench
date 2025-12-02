@@ -2,12 +2,13 @@ use crate::{
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
-    util::gen_account,
+    util::gen_account::{self, AccountGenerator},
 };
 use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
+use tokio::sync::RwLock;
 use std::{
     collections::HashMap,
     marker::PhantomData,
@@ -43,7 +44,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         final_recipients: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
-        account_generator: &mut gen_account::AccountGenerator,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Self {
         let mut degree = faucet_level;
         let total_accounts = final_recipients.len();
@@ -116,6 +117,8 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
                 let accounts = account_generator
+                    .write()
+                    .await
                     .gen_account(
                         start_index as u64,
                         num_accounts_at_level as u64,
@@ -193,6 +196,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     pub fn create_plan_for_level(
         self: &Arc<Self>,
         level: usize,
+        account_init_nonce: Arc<HashMap<Address, u64>>,
         chain_id: u64,
     ) -> Box<dyn TxnPlan> {
         let senders = self.get_senders_for_level(level);
@@ -201,6 +205,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let plan = LevelFaucetPlan::new(
             chain_id,
             level,
+            account_init_nonce,
             senders,
             self.final_recipients.clone(),
             self.account_levels.clone(),
