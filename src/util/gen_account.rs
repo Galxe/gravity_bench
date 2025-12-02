@@ -9,7 +9,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AccountId(u64);
+pub struct AccountId(u32);
 
 pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
@@ -39,12 +39,15 @@ impl AccountGenerator {
     }
 
     pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
-        let start_index = start_index.max(self.accouts.len() as u64);
-        let res = self.gen_deterministic_accounts(start_index, start_index + size);
-        self.accouts.extend(res);
-        self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
-        for i in 0..size {
-            self.accout_to_id.insert(self.accouts[(start_index + i) as usize].address(), AccountId(start_index + i));
+        let begin_index = self.accouts.len() as u64;
+        let end_index = start_index + size;
+        if begin_index < end_index {
+            let res = self.gen_deterministic_accounts(begin_index, end_index);
+            self.accouts.extend(res);
+            self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
+            for i in begin_index..end_index {
+                self.accout_to_id.insert(self.accouts[i as usize].address(), AccountId(i as u32));
+            }
         }
         let mut res = HashMap::new();
         for i in 0..size {
