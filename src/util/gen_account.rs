@@ -25,10 +25,6 @@ impl AccountGenerator {
         self.accouts.iter().zip(self.init_nonces.iter_mut())
     }
 
-    pub fn init_nonce(&mut self, idx: usize, nonce: u64) {
-        self.init_nonces[idx] = nonce;
-    }
-
     pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
         let start_index = start_index.max(self.accouts.len() as u64);
         let res = self.gen_deterministic_accounts(start_index, start_index + size);
