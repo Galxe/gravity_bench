@@ -243,7 +243,7 @@ async fn start_bench() -> Result<()> {
         contract_config
     };
 
-    let mut accout_generator = AccountGenerator::default();
+    let mut accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts * 2);
     let accounts = accout_generator
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
@@ -308,6 +308,7 @@ async fn start_bench() -> Result<()> {
     )
     .await
     .unwrap();
+    init_nonce(&mut accout_generator, eth_clients[0].clone());
     execute_faucet_distribution(
         eth_faucet_builder,
         chain_id,
@@ -388,6 +389,13 @@ async fn start_bench() -> Result<()> {
         .await?;
     }
     Ok(())
+}
+
+async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<EthHttpCli>) {
+    for (account, nonce) in accout_generator.accouts_nonce_mut() {
+        let init_nonce = eth_client.get_nonce(account.address()).await.unwrap();
+        *nonce = init_nonce;
+    }
 }
 
 #[cfg(feature = "dhat-heap")]
