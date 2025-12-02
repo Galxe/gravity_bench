@@ -204,10 +204,7 @@ fn run_command(command: &str) -> Result<Output> {
     }
 }
 
-
 async fn start_bench() -> Result<()> {
-
-    
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
@@ -286,7 +283,9 @@ async fn start_bench() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let address_pool: Arc<dyn AddressPool> = Arc::new(txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()));
+    let address_pool: Arc<dyn AddressPool> = Arc::new(
+        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()),
+    );
 
     let producer = Producer::new(address_pool.clone(), consumer, monitor)
         .unwrap()
@@ -391,7 +390,6 @@ async fn start_bench() -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -402,7 +400,9 @@ async fn main() -> Result<()> {
     let _profiler = dhat::Profiler::new_heap();
     let res = async { start_bench().await };
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install CTRL+C signal handler");
         println!("Received Ctrl+C, saving heap profile...");
     };
     tokio::select! {
