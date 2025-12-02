@@ -9,60 +9,52 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Default)]
 pub struct AccountGenerator {
-    offset: u64,
-    cache: HashMap<String, HashMap<Arc<Address>, Arc<PrivateKeySigner>>>,
+    accouts: Vec<PrivateKeySigner>,
+    init_nonces: Vec<u64>,
 }
 
 impl AccountGenerator {
-    pub fn gen_or_get_accounts(
-        &mut self,
-        key: Option<impl Into<String>>,
-        size: usize,
-    ) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
-        let key = key.map(|k| k.into());
-        if let Some(key) = &key {
-            if let Some(accounts) = self.cache.get(key) {
-                return Ok(accounts.clone());
-            }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            accouts: Vec::with_capacity(capacity),
+            init_nonces: Vec::with_capacity(capacity),
         }
-        let accounts =
-            gen_deterministic_accounts((self.offset..self.offset + size as u64).into_par_iter())?;
-        self.offset += size as u64;
-        if let Some(key) = &key {
-            self.cache.entry(key.clone()).or_insert(accounts.clone());
-        }
-        Ok(accounts)
     }
-}
 
-/// Deterministically generate n Ethereum accounts from a slice of u64 seeds.
-///
-/// # Arguments
-///
-/// * `seeds` - A slice of u64 values used as seeds for generating private keys.
-///
-/// # Returns
-///
-/// * `Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>>` - Map of generated accounts
-pub fn gen_deterministic_accounts(
-    seeds: impl IntoParallelIterator<Item = u64>,
-) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
-    let accounts = seeds
+    pub fn init_nonces(&mut self, nonces: Vec<u64>) {
+        todo!()
+    }
+
+    pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
+        let start_index = start_index.max(self.accouts.len() as u64);
+        let res = self.gen_deterministic_accounts(start_index, start_index + size);
+        self.accouts.extend(res);
+        let mut res = HashMap::new();
+        for i in 0..size {
+            let signer = self.accouts[(start_index + i) as usize].clone();
+            res.insert(Arc::new(signer.address()), Arc::new(signer));
+        }
+        Ok(res)
+    }
+
+    fn gen_deterministic_accounts(
+        &self,
+        start_index: u64,
+        end_index: u64,
+    ) -> Vec<PrivateKeySigner> {
+        let accounts = (start_index..end_index)
         .into_par_iter()
         .map(|seed| {
-            let private_key_bytes = keccak256(seed.to_le_bytes());
-
-            let signer = Arc::new(
-                PrivateKeySigner::from_slice(private_key_bytes.as_slice())
-                    .context("Failed to create deterministic signer")
-                    .unwrap(),
-            );
-
-            let address = Arc::new(signer.address());
-
-            (address, signer)
-        })
-        .collect::<HashMap<_, _>>();
-
-    Ok(accounts)
+                let private_key_bytes = keccak256(seed.to_le_bytes());
+    
+                let signer = 
+                    PrivateKeySigner::from_slice(private_key_bytes.as_slice())
+                        .context("Failed to create deterministic signer")
+                        .unwrap();
+                signer
+            })
+            .collect::<Vec<_>>();
+    
+        accounts
+    }
 }

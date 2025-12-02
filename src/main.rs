@@ -245,7 +245,7 @@ async fn start_bench() -> Result<()> {
 
     let mut accout_generator = AccountGenerator::default();
     let accounts = accout_generator
-        .gen_or_get_accounts(None::<&str>, benchmark_config.accounts.num_accounts)
+        .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
     let account_addresses = Arc::new(
         accounts

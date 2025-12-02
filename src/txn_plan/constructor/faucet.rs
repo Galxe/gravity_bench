@@ -110,17 +110,19 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         };
 
         let mut account_levels = vec![];
+        let mut start_index = final_recipients.len();
         if total_levels > 1 {
             let num_intermediate_levels = total_levels - 1;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
                 let accounts = account_generator
-                    .gen_or_get_accounts(
-                        Some(format!("intermediate_level_{}", level)),
-                        num_accounts_at_level as usize,
+                    .gen_account(
+                        start_index as u64,
+                        num_accounts_at_level as u64,
                     )
                     .unwrap();
                 account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
+                start_index += num_accounts_at_level as usize;
             }
         }
 
