@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::{atomic::AtomicU64, Arc}};
+use std::{collections::HashMap, sync::{Arc, atomic::{AtomicU64, Ordering}}};
 
 use alloy::{
     primitives::{keccak256, Address},
@@ -28,8 +28,8 @@ impl AccountGenerator {
 
     pub fn init_nonce_map(&self) -> Arc<HashMap<Address, u64>> {
         let mut map = HashMap::new();
-        for (account, id) in self.accout_to_id.iter() {
-            map.insert(account.clone(), id.0);
+        for (account, nonce) in self.accouts_nonce_iter() {
+            map.insert(account.address(), nonce.load(Ordering::Relaxed));
         }
         Arc::new(map)
     }
