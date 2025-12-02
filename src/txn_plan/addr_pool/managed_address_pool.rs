@@ -47,8 +47,6 @@ impl AddressPool for RandomAddressPool {
         let mut inner = self.inner.lock();
         let len = inner.ready_accounts.len();
         if count < len {
-            // 从尾部截取 count 个元素，保留头部
-            // 这样只需要为取出的 count 个元素分配内存，而不是为剩余的大量元素分配
             inner.ready_accounts.split_off(len - count)
         } else {
             std::mem::take(&mut inner.ready_accounts)
