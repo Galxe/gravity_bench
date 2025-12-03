@@ -166,7 +166,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     &sender_signer,
                                 )
                                 .unwrap();
-                                let metadata = Arc::new(TxnMetadata {
+                            let metadata = Arc::new(TxnMetadata {
                                     from_account: Arc::new(sender_signer.address()),
                                     nonce,
                                     txn_id: Uuid::new_v4(),
