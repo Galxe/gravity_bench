@@ -246,7 +246,7 @@ async fn start_bench() -> Result<()> {
         contract_config
     };
 
-    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts * 2);
+    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts);
     let accounts = accout_generator
         .write()
         .await

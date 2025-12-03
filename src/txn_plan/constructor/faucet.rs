@@ -2,7 +2,7 @@ use crate::{
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
-    util::gen_account::{self, AccountGenerator},
+    util::gen_account::{AccountGenerator},
 };
 use alloy::{
     primitives::{Address, U256},
