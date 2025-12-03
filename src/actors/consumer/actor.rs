@@ -221,13 +221,10 @@ impl Consumer {
             {
                 // Transaction sent successfully
                 Ok((tx_hash, rpc_url)) => {
-                    debug!(
-                        "Txn {:?} sent successfully on attempt {}. Hash: {:?}/{:?}, RPC: {}",
-                        metadata.txn_id,
-                        attempt,
+                    tracing::debug!(
+                        "Txn sent successfully. Hash: from {} hash {}",
+                        metadata.from_account,
                         tx_hash,
-                        keccak256(&signed_txn.bytes),
-                        rpc_url
                     );
                     monitor_addr.do_send(UpdateSubmissionResult {
                         metadata,

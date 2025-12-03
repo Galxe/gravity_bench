@@ -273,8 +273,8 @@ async fn start_bench() -> Result<()> {
         .unwrap();
     let account_addresses = Arc::new(
         accounts
-            .keys()
-            .map(|account| account.clone())
+            .iter()
+            .map(|(address, _)| address.clone())
             .collect::<Vec<_>>(),
     );
     // Create EthHttpCli instance

@@ -124,7 +124,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
                         num_accounts_at_level as u64,
                     )
                     .unwrap();
-                account_levels.push(accounts.values().cloned().collect::<Vec<_>>());
+                account_levels.push(accounts.iter().map(|(_, signer)| signer.clone()).collect::<Vec<_>>());
                 start_index += num_accounts_at_level as usize;
             }
         }

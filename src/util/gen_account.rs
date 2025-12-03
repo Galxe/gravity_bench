@@ -38,7 +38,7 @@ impl AccountGenerator {
         self.accouts.iter().zip(self.init_nonces.iter().cloned())
     }
 
-    pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<HashMap<Arc<Address>, Arc<PrivateKeySigner>>> {
+    pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<Vec<(Arc<Address>, Arc<PrivateKeySigner>)>> {
         let begin_index = self.accouts.len() as u64;
         let end_index = start_index + size;
         if begin_index < end_index {
@@ -49,10 +49,10 @@ impl AccountGenerator {
                 self.accout_to_id.insert(self.accouts[i as usize].address(), AccountId(i as u32));
             }
         }
-        let mut res = HashMap::new();
+        let mut res = Vec::new();
         for i in 0..size {
             let signer = self.accouts[(start_index + i) as usize].clone();
-            res.insert(Arc::new(signer.address()), Arc::new(signer));
+            res.push((Arc::new(signer.address()), Arc::new(signer)));
         }
         Ok(res)
     }

@@ -133,7 +133,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                         .for_each(|(sender_index, sender_signer)| {
                             let start_index = (chunk_index * 1024 + sender_index) * degree;
                             let end_index = (start_index + degree).min(final_recipients.len());
-
+                            if end_index < start_index {
+                                return;
+                            }
                             for i in start_index..end_index {
                                 let (to_address, value) = if is_final_level {
                                     let to = final_recipients[i].clone();
@@ -144,7 +146,6 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     let val = intermediate_funding_amounts[level];
                                     (Arc::new(to), val)
                                 };
-
                                 let nonce_map_guard = nonce_map.lock().unwrap();
                                 let nonce = nonce_map_guard
                                     .get(&sender_signer.address())
