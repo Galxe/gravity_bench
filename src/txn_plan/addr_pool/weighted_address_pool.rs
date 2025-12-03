@@ -153,6 +153,12 @@ impl AddressPool for WeightedAddressPool {
         result
     }
 
+    fn clean_ready_accounts(&self) {
+        self.inner.lock().hot_ready_accounts.clear();
+        self.inner.lock().normal_ready_accounts.clear();
+        self.inner.lock().long_tail_ready_accounts.clear();
+    }
+
     fn unlock_next_nonce(&self, account: Arc<Address>) {
         self.unlock_account(account, None);
     }

@@ -14,7 +14,10 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader}, sync::RwLock};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader},
+    sync::RwLock,
+};
 use tracing::{info, Level};
 
 use crate::{
@@ -101,7 +104,8 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
             faucet_name, level
         );
 
-        let faucet_level_plan = faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
+        let faucet_level_plan =
+            faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
 
         let rx = run_plan(faucet_level_plan, producer).await?;
         rx.await??;
@@ -207,6 +211,21 @@ fn run_command(command: &str) -> Result<Output> {
     }
 }
 
+async fn get_init_nonce_map(
+    accout_generator: Arc<RwLock<AccountGenerator>>,
+    faucet_private_key: &str,
+    eth_client: Arc<EthHttpCli>,
+) -> Arc<HashMap<Address, u64>> {
+    let mut init_nonce_map = accout_generator.read().await.init_nonce_map();
+    let faucet_signer = PrivateKeySigner::from_str(faucet_private_key).unwrap();
+    let faucet_address = faucet_signer.address();
+    init_nonce_map.insert(
+        faucet_address,
+        eth_client.get_nonce(faucet_address).await.unwrap(),
+    );
+    Arc::new(init_nonce_map)
+}
+
 async fn start_bench() -> Result<()> {
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
@@ -268,12 +287,10 @@ async fn start_bench() -> Result<()> {
         })
         .collect();
 
-    
     let address_pool: Arc<dyn AddressPool> = Arc::new(
         txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()),
     );
 
-    
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     info!("Initializing Faucet constructor...");
@@ -315,13 +332,22 @@ async fn start_bench() -> Result<()> {
         Some(benchmark_config.target_tps as u32),
     )
     .start();
-    let init_nonce_map = 
-        accout_generator.read().await.init_nonce_map();
+    let init_nonce_map = get_init_nonce_map(
+        accout_generator.clone(),
+        benchmark_config.faucet.private_key.as_str(),
+        eth_clients[0].clone(),
+    )
+    .await;
 
-    let producer = Producer::new(address_pool.clone(), consumer, monitor, accout_generator.clone())
-        .await
-        .unwrap()
-        .start();
+    let producer = Producer::new(
+        address_pool.clone(),
+        consumer,
+        monitor,
+        accout_generator.clone(),
+    )
+    .await
+    .unwrap()
+    .start();
     execute_faucet_distribution(
         eth_faucet_builder,
         chain_id,
@@ -409,14 +435,16 @@ async fn start_bench() -> Result<()> {
 async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client: Arc<EthHttpCli>) {
     tracing::info!("Initializing nonce...");
     let accout_generator = accout_generator.read().await;
-    let tasks = accout_generator.accouts_nonce_iter().map(|(account, nonce)| {
-        let client = eth_client.clone();
-        let addr = account.address();
-        async move {
-            let init_nonce = client.get_nonce(addr).await.unwrap();
-            nonce.store(init_nonce, Ordering::Relaxed);
-        }
-    });
+    let tasks = accout_generator
+        .accouts_nonce_iter()
+        .map(|(account, nonce)| {
+            let client = eth_client.clone();
+            let addr = account.address();
+            async move {
+                let init_nonce = client.get_nonce(addr).await.unwrap();
+                nonce.store(init_nonce, Ordering::Relaxed);
+            }
+        });
 
     stream::iter(tasks)
         .buffer_unordered(1024)

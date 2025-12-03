@@ -53,6 +53,11 @@ impl AddressPool for RandomAddressPool {
         }
     }
 
+    fn clean_ready_accounts(&self) {
+        let mut inner = self.inner.lock();
+        inner.ready_accounts.clear();
+    }
+
     fn unlock_next_nonce(&self, account: Arc<Address>) {
         let mut inner = self.inner.lock();
         if let Some(status) = inner.account_status.get_mut(&account) {
@@ -62,6 +67,8 @@ impl AddressPool for RandomAddressPool {
             inner.ready_accounts.push((signer, account.clone(), status));
         }
     }
+
+
 
     fn unlock_correct_nonce(&self, account: Arc<Address>, nonce: u32) {
         let mut inner = self.inner.lock();

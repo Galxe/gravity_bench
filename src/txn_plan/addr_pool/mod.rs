@@ -23,6 +23,8 @@ pub trait AddressPool: Send + Sync {
     /// Resumes all accounts, making them available again.
     fn resume_all_accounts(&self);
 
+    fn clean_ready_accounts(&self);
+
     /// Checks if all accounts in the pool are ready.
     fn is_full_ready(&self) -> bool;
 

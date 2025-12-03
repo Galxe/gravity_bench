@@ -90,8 +90,12 @@ impl Producer {
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
         let account_generator = account_generator.read().await;
+        address_pool.clean_ready_accounts();
         for (account, nonce) in account_generator.accouts_nonce_iter() {
-            nonce_cache.insert(Arc::new(account.address()), nonce.load(Ordering::Relaxed) as u32);
+            let address = Arc::new(account.address());
+            let nonce = nonce.load(Ordering::Relaxed) as u32;   
+            nonce_cache.insert(address.clone(), nonce);
+            address_pool.unlock_correct_nonce(address.clone(), nonce);
         }
         Ok(Self {
             state: ProducerState::running(),
@@ -153,13 +157,11 @@ impl Producer {
         state: ProducerState,
         nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
     ) -> Result<(), anyhow::Error> {
-        tracing::debug!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-
         let iterator = plan.as_mut().build_txns(ready_accounts)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.

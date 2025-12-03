@@ -26,12 +26,12 @@ impl AccountGenerator {
         }))
     }
 
-    pub fn init_nonce_map(&self) -> Arc<HashMap<Address, u64>> {
+    pub fn init_nonce_map(&self) -> HashMap<Address, u64> {
         let mut map = HashMap::new();
         for (account, nonce) in self.accouts_nonce_iter() {
             map.insert(account.address(), nonce.load(Ordering::Relaxed));
         }
-        Arc::new(map)
+        map
     }
 
     pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&PrivateKeySigner, Arc<AtomicU64>)> {
