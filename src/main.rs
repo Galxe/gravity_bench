@@ -221,7 +221,7 @@ async fn get_init_nonce_map(
     let faucet_address = faucet_signer.address();
     init_nonce_map.insert(
         faucet_address,
-        eth_client.get_nonce(faucet_address).await.unwrap(),
+        eth_client.get_txn_count(faucet_address).await.unwrap(),
     );
     Arc::new(init_nonce_map)
 }
@@ -317,7 +317,20 @@ async fn start_bench() -> Result<()> {
         benchmark_config.performance.max_pool_size,
     )
     .start();
-
+    let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
+    for (sign, nonce) in accout_generator.read().await.accouts_nonce_iter() {
+        file.write(
+            format!(
+                "{}, {}, {}\n",
+                hex::encode(sign.to_bytes()),
+                sign.address().to_string(),
+                nonce.load(Ordering::Relaxed),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    }
     // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients
         .iter()
@@ -370,7 +383,7 @@ async fn start_bench() -> Result<()> {
             benchmark_config.faucet.faucet_level as usize,
             faucet_token_balance,
             &benchmark_config.faucet.private_key,
-            1 + benchmark_config.faucet.faucet_level as u64,
+            start_nonce,
             account_addresses.clone(),
             Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
             U256::ZERO,
@@ -388,20 +401,6 @@ async fn start_bench() -> Result<()> {
             init_nonce_map.clone(),
         )
         .await?;
-    }
-
-    let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-    for account in accounts.iter() {
-        file.write(
-            format!(
-                "{}, {}\n",
-                account.0.to_string(),
-                hex::encode(account.1.to_bytes())
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
     }
 
     let tps = benchmark_config.target_tps as usize;
@@ -441,8 +440,11 @@ async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client:
             let client = eth_client.clone();
             let addr = account.address();
             async move {
-                let init_nonce = client.get_nonce(addr).await.unwrap();
-                nonce.store(init_nonce, Ordering::Relaxed);
+                let init_nonce = client.get_txn_count(addr).await;
+                match init_nonce {
+                    Ok(init_nonce) => nonce.store(init_nonce, Ordering::Relaxed),
+                    Err(e) => tracing::error!("Failed to get nonce for address: {}: {}", addr, e),
+                }
             }
         });
 

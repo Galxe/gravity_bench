@@ -271,7 +271,7 @@ impl Consumer {
                             .provider(&url)
                             .await
                             .unwrap()
-                            .get_nonce(*metadata.from_account.as_ref())
+                            .get_txn_count(*metadata.from_account.as_ref())
                             .await
                         {
                             // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated
