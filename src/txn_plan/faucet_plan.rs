@@ -150,11 +150,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     .get(&sender_signer.address())
                                     .unwrap()
                                     .fetch_add(1, Ordering::Relaxed);
-                                let init_nonce = account_init_nonce.get(&sender_signer.address());
-                                if let Some(init_nonce) = init_nonce {
-                                    if *init_nonce > nonce {
-                                        continue;
-                                    }
+                                let init_nonce = account_init_nonce.get(&sender_signer.address()).unwrap_or(&0);
+                                if *init_nonce > nonce && init_nonce != &0 {
+                                    continue;
                                 }
                                 let tx_request = txn_builder.build_faucet_txn(
                                     *to_address,
