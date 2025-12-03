@@ -9,11 +9,17 @@ use tokio::sync::RwLock;
 use crate::{
     config::LiquidityPair,
     txn_plan::{
-        TxnPlan, addr_pool::AddressPool, constructor::{
+        addr_pool::AddressPool,
+        constructor::{
             ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
             SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
-        }, faucet_txn_builder::FaucetTxnBuilder, plan::ManyToOnePlan, traits::PlanExecutionMode
-    }, util::gen_account::AccountGenerator,
+        },
+        faucet_txn_builder::FaucetTxnBuilder,
+        plan::ManyToOnePlan,
+        traits::PlanExecutionMode,
+        TxnPlan,
+    },
+    util::gen_account::AccountGenerator,
 };
 
 /// Plan builder - Provides convenient APIs to create various types of transaction plans

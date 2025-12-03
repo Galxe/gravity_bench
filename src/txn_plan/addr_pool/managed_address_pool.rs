@@ -22,7 +22,10 @@ impl RandomAddressPool {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
         let mut hashmap = HashMap::new();
-        let all_account_addresses: Vec<Arc<Address>> = account_signers.iter().map(|(address, _)| address.clone()).collect();
+        let all_account_addresses: Vec<Arc<Address>> = account_signers
+            .iter()
+            .map(|(address, _)| address.clone())
+            .collect();
         for (addr, signer) in account_signers.iter() {
             // assume all address start from nonce, this is correct beacause a nonce too low error will trigger correct nonce
             let nonce = 0;
@@ -69,8 +72,6 @@ impl AddressPool for RandomAddressPool {
             inner.ready_accounts.push((signer, account.clone(), status));
         }
     }
-
-
 
     fn unlock_correct_nonce(&self, account: Arc<Address>, nonce: u32) {
         let mut inner = self.inner.lock();

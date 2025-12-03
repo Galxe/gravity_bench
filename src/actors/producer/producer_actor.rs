@@ -1,11 +1,11 @@
 use actix::prelude::*;
 use alloy::primitives::Address;
 use dashmap::DashMap;
-use tokio::sync::RwLock;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
@@ -86,14 +86,14 @@ impl Producer {
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
-        account_generator: Arc<RwLock<AccountGenerator>>,   
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
         let account_generator = account_generator.read().await;
         address_pool.clean_ready_accounts();
         for (account, nonce) in account_generator.accouts_nonce_iter() {
             let address = Arc::new(account.address());
-            let nonce = nonce.load(Ordering::Relaxed) as u32;   
+            let nonce = nonce.load(Ordering::Relaxed) as u32;
             nonce_cache.insert(address.clone(), nonce);
             address_pool.unlock_correct_nonce(address.clone(), nonce);
         }

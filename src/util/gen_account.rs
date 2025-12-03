@@ -1,4 +1,10 @@
-use std::{collections::HashMap, sync::{Arc, atomic::{AtomicU64, Ordering}}};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use alloy::{
     primitives::{keccak256, Address},
@@ -19,7 +25,7 @@ pub struct AccountGenerator {
 
 impl AccountGenerator {
     pub fn with_capacity(capacity: usize) -> Arc<RwLock<Self>> {
-        Arc::new(RwLock::new(   Self {
+        Arc::new(RwLock::new(Self {
             accouts: Vec::with_capacity(capacity),
             accout_to_id: HashMap::with_capacity(capacity),
             init_nonces: Vec::with_capacity(capacity),
@@ -38,15 +44,21 @@ impl AccountGenerator {
         self.accouts.iter().zip(self.init_nonces.iter().cloned())
     }
 
-    pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<Vec<(Arc<Address>, Arc<PrivateKeySigner>)>> {
+    pub fn gen_account(
+        &mut self,
+        start_index: u64,
+        size: u64,
+    ) -> Result<Vec<(Arc<Address>, Arc<PrivateKeySigner>)>> {
         let begin_index = self.accouts.len() as u64;
         let end_index = start_index + size;
         if begin_index < end_index {
             let res = self.gen_deterministic_accounts(begin_index, end_index);
             self.accouts.extend(res);
-            self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
+            self.init_nonces
+                .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
             for i in begin_index..end_index {
-                self.accout_to_id.insert(self.accouts[i as usize].address(), AccountId(i as u32));
+                self.accout_to_id
+                    .insert(self.accouts[i as usize].address(), AccountId(i as u32));
             }
         }
         let mut res = Vec::new();
@@ -63,18 +75,17 @@ impl AccountGenerator {
         end_index: u64,
     ) -> Vec<PrivateKeySigner> {
         let accounts = (start_index..end_index)
-        .into_par_iter()
-        .map(|seed| {
+            .into_par_iter()
+            .map(|seed| {
                 let private_key_bytes = keccak256(seed.to_le_bytes());
-    
-                let signer = 
-                    PrivateKeySigner::from_slice(private_key_bytes.as_slice())
-                        .context("Failed to create deterministic signer")
-                        .unwrap();
+
+                let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice())
+                    .context("Failed to create deterministic signer")
+                    .unwrap();
                 signer
             })
             .collect::<Vec<_>>();
-    
+
         accounts
     }
 }

@@ -151,7 +151,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     .get(&sender_signer.address())
                                     .unwrap()
                                     .fetch_add(1, Ordering::Relaxed);
-                                let init_nonce = account_init_nonce.get(&sender_signer.address()).unwrap_or(&0);
+                                let init_nonce = account_init_nonce
+                                    .get(&sender_signer.address())
+                                    .unwrap_or(&0);
                                 if *init_nonce > nonce && init_nonce != &0 {
                                     continue;
                                 }
@@ -166,7 +168,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     &sender_signer,
                                 )
                                 .unwrap();
-                            let metadata = Arc::new(TxnMetadata {
+                                let metadata = Arc::new(TxnMetadata {
                                     from_account: Arc::new(sender_signer.address()),
                                     nonce,
                                     txn_id: Uuid::new_v4(),

@@ -2,18 +2,18 @@ use crate::{
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
-    util::gen_account::{AccountGenerator},
+    util::gen_account::AccountGenerator,
 };
 use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
-use tokio::sync::RwLock;
 use std::{
     collections::HashMap,
     marker::PhantomData,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
+use tokio::sync::RwLock;
 use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.
@@ -119,12 +119,14 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
                 let accounts = account_generator
                     .write()
                     .await
-                    .gen_account(
-                        start_index as u64,
-                        num_accounts_at_level as u64,
-                    )
+                    .gen_account(start_index as u64, num_accounts_at_level as u64)
                     .unwrap();
-                account_levels.push(accounts.iter().map(|(_, signer)| signer.clone()).collect::<Vec<_>>());
+                account_levels.push(
+                    accounts
+                        .iter()
+                        .map(|(_, signer)| signer.clone())
+                        .collect::<Vec<_>>(),
+                );
                 start_index += num_accounts_at_level as usize;
             }
         }
