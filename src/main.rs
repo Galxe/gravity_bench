@@ -268,26 +268,7 @@ async fn start_bench() -> Result<()> {
         })
         .collect();
 
-    let monitor = Monitor::new_with_clients(
-        eth_clients.clone(),
-        benchmark_config.performance.max_pool_size,
-    )
-    .start();
-
-    // Use the same client instances for Consumer to share metrics
-    let eth_providers: Vec<EthHttpCli> = eth_clients
-        .iter()
-        .map(|client| (**client).clone()) // Clone the actual EthHttpCli instead of creating new ones
-        .collect();
-
-    let consumer = Consumer::new_with_providers(
-        eth_providers,
-        benchmark_config.performance.num_senders,
-        monitor.clone(),
-        benchmark_config.performance.max_pool_size,
-        Some(benchmark_config.target_tps as u32),
-    )
-    .start();
+    
     let address_pool: Arc<dyn AddressPool> = Arc::new(
         txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()),
     );
@@ -314,6 +295,26 @@ async fn start_bench() -> Result<()> {
     if args.recover {
         init_nonce(accout_generator.clone(), eth_clients[0].clone()).await;
     }
+    let monitor = Monitor::new_with_clients(
+        eth_clients.clone(),
+        benchmark_config.performance.max_pool_size,
+    )
+    .start();
+
+    // Use the same client instances for Consumer to share metrics
+    let eth_providers: Vec<EthHttpCli> = eth_clients
+        .iter()
+        .map(|client| (**client).clone()) // Clone the actual EthHttpCli instead of creating new ones
+        .collect();
+
+    let consumer = Consumer::new_with_providers(
+        eth_providers,
+        benchmark_config.performance.num_senders,
+        monitor.clone(),
+        benchmark_config.performance.max_pool_size,
+        Some(benchmark_config.target_tps as u32),
+    )
+    .start();
     let init_nonce_map = 
         accout_generator.read().await.init_nonce_map();
 
@@ -406,6 +407,7 @@ async fn start_bench() -> Result<()> {
 }
 
 async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client: Arc<EthHttpCli>) {
+    tracing::info!("Initializing nonce...");
     let accout_generator = accout_generator.read().await;
     let tasks = accout_generator.accouts_nonce_iter().map(|(account, nonce)| {
         let client = eth_client.clone();
@@ -420,6 +422,7 @@ async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client:
         .buffer_unordered(1024)
         .collect::<Vec<_>>()
         .await;
+    tracing::info!("Nonce initialized");
 }
 
 #[cfg(feature = "dhat-heap")]
