@@ -27,6 +27,7 @@ const DEFAULT_CONCURRENCY_LIMIT: usize = 256;
 
 pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     id: PlanId,
+    account_init_nonce: Arc<HashMap<Address, u64>>,
     execution_mode: PlanExecutionMode,
     chain_id: u64,
     level: usize,
@@ -48,6 +49,7 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
     pub fn new(
         chain_id: u64,
         level: usize,
+        account_init_nonce: Arc<HashMap<Address, u64>>,
         senders: Vec<Arc<PrivateKeySigner>>,
         final_recipients: Arc<Vec<Arc<Address>>>,
         account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
@@ -65,6 +67,7 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
         };
         Self {
             id,
+            account_init_nonce,
             execution_mode,
             chain_id,
             level,
@@ -118,6 +121,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
         let level = self.level;
         let is_final_level = self.is_final_level;
         let txn_builder = self.txn_builder.clone();
+        let account_init_nonce = self.account_init_nonce.clone();
         let handle = tokio::task::spawn_blocking(move || {
             senders
                 .chunks(1024)
@@ -129,7 +133,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                         .for_each(|(sender_index, sender_signer)| {
                             let start_index = (chunk_index * 1024 + sender_index) * degree;
                             let end_index = (start_index + degree).min(final_recipients.len());
-
+                            if end_index < start_index {
+                                return;
+                            }
                             for i in start_index..end_index {
                                 let (to_address, value) = if is_final_level {
                                     let to = final_recipients[i].clone();
@@ -140,12 +146,17 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     let val = intermediate_funding_amounts[level];
                                     (Arc::new(to), val)
                                 };
-
                                 let nonce_map_guard = nonce_map.lock().unwrap();
                                 let nonce = nonce_map_guard
                                     .get(&sender_signer.address())
                                     .unwrap()
                                     .fetch_add(1, Ordering::Relaxed);
+                                let init_nonce = account_init_nonce
+                                    .get(&sender_signer.address())
+                                    .unwrap_or(&0);
+                                if *init_nonce > nonce && init_nonce != &0 {
+                                    continue;
+                                }
                                 let tx_request = txn_builder.build_faucet_txn(
                                     *to_address,
                                     value,

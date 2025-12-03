@@ -221,13 +221,10 @@ impl Consumer {
             {
                 // Transaction sent successfully
                 Ok((tx_hash, rpc_url)) => {
-                    debug!(
-                        "Txn {:?} sent successfully on attempt {}. Hash: {:?}/{:?}, RPC: {}",
-                        metadata.txn_id,
-                        attempt,
+                    tracing::debug!(
+                        "Txn sent successfully. Hash: from {} hash {}",
+                        metadata.from_account,
                         tx_hash,
-                        keccak256(&signed_txn.bytes),
-                        rpc_url
                     );
                     monitor_addr.do_send(UpdateSubmissionResult {
                         metadata,
@@ -271,7 +268,7 @@ impl Consumer {
                             .provider(&url)
                             .await
                             .unwrap()
-                            .get_nonce(*metadata.from_account.as_ref())
+                            .get_txn_count(*metadata.from_account.as_ref())
                             .await
                         {
                             // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated

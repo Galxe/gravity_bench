@@ -5,6 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
@@ -14,6 +15,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
+use crate::util::gen_account::AccountGenerator;
 
 use super::messages::RegisterTxnPlan;
 
@@ -80,11 +82,21 @@ pub struct Producer {
 }
 
 impl Producer {
-    pub fn new(
+    pub async fn new(
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<Self, anyhow::Error> {
+        let nonce_cache = Arc::new(DashMap::new());
+        let account_generator = account_generator.read().await;
+        address_pool.clean_ready_accounts();
+        for (account, nonce) in account_generator.accouts_nonce_iter() {
+            let address = Arc::new(account.address());
+            let nonce = nonce.load(Ordering::Relaxed) as u32;
+            nonce_cache.insert(address.clone(), nonce);
+            address_pool.unlock_correct_nonce(address.clone(), nonce);
+        }
         Ok(Self {
             state: ProducerState::running(),
             stats: ProducerStats {
@@ -97,7 +109,7 @@ impl Producer {
                 failed_txns: 0,
             },
             address_pool,
-            nonce_cache: Arc::new(DashMap::new()),
+            nonce_cache,
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
@@ -145,13 +157,11 @@ impl Producer {
         state: ProducerState,
         nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
     ) -> Result<(), anyhow::Error> {
-        tracing::debug!("Starting execution of plan: {}", plan.name());
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-
         let iterator = plan.as_mut().build_txns(ready_accounts)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.

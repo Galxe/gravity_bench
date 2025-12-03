@@ -18,19 +18,24 @@ pub struct RandomAddressPool {
 
 impl RandomAddressPool {
     #[allow(unused)]
-    pub fn new(account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>) -> Self {
+    pub fn new(account_signers: Vec<(Arc<Address>, Arc<PrivateKeySigner>)>) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
-        let all_account_addresses: Vec<Arc<Address>> = account_signers.keys().cloned().collect();
+        let mut hashmap = HashMap::new();
+        let all_account_addresses: Vec<Arc<Address>> = account_signers
+            .iter()
+            .map(|(address, _)| address.clone())
+            .collect();
         for (addr, signer) in account_signers.iter() {
             // assume all address start from nonce, this is correct beacause a nonce too low error will trigger correct nonce
             let nonce = 0;
+            hashmap.insert(addr.clone(), signer.clone());
             account_status.insert(addr.clone(), nonce);
             ready_accounts.push((signer.clone(), addr.clone(), nonce));
         }
 
         let inner = Inner {
-            account_signers,
+            account_signers: hashmap,
             account_status,
             ready_accounts,
             all_account_addresses,
@@ -51,6 +56,11 @@ impl AddressPool for RandomAddressPool {
         } else {
             std::mem::take(&mut inner.ready_accounts)
         }
+    }
+
+    fn clean_ready_accounts(&self) {
+        let mut inner = self.inner.lock();
+        inner.ready_accounts.clear();
     }
 
     fn unlock_next_nonce(&self, account: Arc<Address>) {

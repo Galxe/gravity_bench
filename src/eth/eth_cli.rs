@@ -153,7 +153,7 @@ impl EthHttpCli {
         self.chain_id
     }
 
-    pub async fn get_nonce(&self, address: Address) -> Result<u64> {
+    pub async fn get_txn_count(&self, address: Address) -> Result<u64> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let nonce = self.inner[0].get_transaction_count(address).await?;
             Ok(nonce)
