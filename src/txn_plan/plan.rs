@@ -211,7 +211,9 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                             txs.into_iter()
                                 .map(|(from_account_id, tx_envelope)| {
                                     let metadata = Arc::new(TxnMetadata {
-                                        from_account: Arc::new(account_generator.get_address_by_id(from_account_id)),
+                                        from_account: Arc::new(
+                                            account_generator.get_address_by_id(from_account_id),
+                                        ),
                                         from_account_id: from_account_id,
                                         nonce: 0,
                                         txn_id: Uuid::new_v4(),

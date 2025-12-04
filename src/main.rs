@@ -452,7 +452,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[actix::main]
 async fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")] 
+    #[cfg(feature = "dhat-heap")]
     let _profiler = {
         println!("starting heap profiler...");
         dhat::Profiler::new_heap()

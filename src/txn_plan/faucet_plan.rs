@@ -129,11 +129,10 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                 .chunks(1024)
                 .enumerate()
                 .for_each(|(chunk_index, chunk)| {
-                    chunk
-                        .into_par_iter()
-                        .enumerate()
-                        .for_each(|(sender_index, sender_signer_id)| {
-                            let sender_signer = account_generator.get_signer_by_id(*sender_signer_id);
+                    chunk.into_par_iter().enumerate().for_each(
+                        |(sender_index, sender_signer_id)| {
+                            let sender_signer =
+                                account_generator.get_signer_by_id(*sender_signer_id);
                             let start_index = (chunk_index * 1024 + sender_index) * degree;
                             let end_index = (start_index + degree).min(final_recipients.len());
                             if end_index < start_index {
@@ -186,7 +185,8 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                 })
                                 .unwrap();
                             }
-                        })
+                        },
+                    )
                 });
             drop(tx);
         });

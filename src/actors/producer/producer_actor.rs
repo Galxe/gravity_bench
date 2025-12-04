@@ -416,8 +416,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
             SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                 self.stats.success_txns += 1;
                 let account_id = msg.metadata.from_account_id;
-                self.nonce_cache
-                    .insert(account_id, *expect_nonce as u32);
+                self.nonce_cache.insert(account_id, *expect_nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
@@ -426,7 +425,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
-            let account_id = msg.metadata.from_account_id;
+                let account_id = msg.metadata.from_account_id;
                 match msg.result.as_ref() {
                     SubmissionResult::Success(_) => {
                         address_pool.unlock_next_nonce(account_id);
