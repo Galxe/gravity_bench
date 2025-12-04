@@ -11,12 +11,11 @@ struct Inner {
     account_status: HashMap<AccountId, u32>,
     ready_accounts: Vec<(AccountId, u32)>,
     all_account_ids: Vec<AccountId>,
-    account_id_to_address: HashMap<AccountId, Address>,
-    address_to_account_id: HashMap<Address, AccountId>,
 }
 
 pub struct RandomAddressPool {
     inner: Mutex<Inner>,
+    account_generator: Arc<RwLock<AccountGenerator>>,
 }
 
 impl RandomAddressPool {
@@ -24,32 +23,23 @@ impl RandomAddressPool {
     pub fn new(account_ids: Vec<AccountId>, account_generator: Arc<RwLock<AccountGenerator>>) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
-        let mut account_id_to_address = HashMap::new();
-        let mut address_to_account_id = HashMap::new();
         
-        // Build address mapping synchronously by blocking on the async read
-        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
         for &account_id in account_ids.iter() {
             // assume all address start from nonce, this is correct beacause a nonce too low error will trigger correct nonce
             let nonce = 0;
-            let address = gen.get_address_by_id(account_id);
             account_status.insert(account_id, nonce);
             ready_accounts.push((account_id, nonce));
-            account_id_to_address.insert(account_id, address);
-            address_to_account_id.insert(address, account_id);
         }
-        drop(gen);
 
         let inner = Inner {
             account_status,
             ready_accounts,
             all_account_ids: account_ids,
-            account_id_to_address,
-            address_to_account_id,
         };
 
         Self {
             inner: Mutex::new(inner),
+            account_generator,
         }
     }
 }
@@ -123,12 +113,14 @@ impl AddressPool for RandomAddressPool {
 
     fn select_receiver(&self, excluded: &Address) -> Address {
         let inner = self.inner.lock();
-        let excluded_id = inner.address_to_account_id.get(excluded);
+        let gen = tokio::runtime::Handle::current().block_on(self.account_generator.read());
+        
+        let excluded_id = gen.get_id_by_address(excluded);
         loop {
             let idx = rand::random::<usize>() % inner.all_account_ids.len();
             let account_id = inner.all_account_ids[idx];
-            if Some(&account_id) != excluded_id {
-                return *inner.account_id_to_address.get(&account_id).unwrap();
+            if Some(account_id) != excluded_id {
+                return gen.get_address_by_id(account_id);
             }
         }
     }

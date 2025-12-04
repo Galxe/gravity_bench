@@ -19,8 +19,6 @@ struct Inner {
     // Static data
     account_categories: HashMap<AccountId, AccountCategory>,
     all_account_ids: Vec<AccountId>,
-    account_id_to_address: HashMap<AccountId, Address>,
-    address_to_account_id: HashMap<Address, AccountId>,
 
     // Dynamic data
     account_status: HashMap<AccountId, u32>,
@@ -31,6 +29,7 @@ struct Inner {
 
 pub struct WeightedAddressPool {
     inner: Mutex<Inner>,
+    account_generator: Arc<RwLock<AccountGenerator>>,
 }
 
 impl WeightedAddressPool {
@@ -47,17 +46,8 @@ impl WeightedAddressPool {
         let mut hot_accounts = Vec::with_capacity(hot_count);
         let mut normal_accounts = Vec::with_capacity(normal_count);
         let mut long_tail_accounts = Vec::with_capacity(total_accounts - hot_count - normal_count);
-        let mut account_id_to_address = HashMap::new();
-        let mut address_to_account_id = HashMap::new();
-
-        // Build address mapping synchronously by blocking on the async read
-        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
         
         for (i, &account_id) in all_account_ids.iter().enumerate() {
-            let address = gen.get_address_by_id(account_id);
-            account_id_to_address.insert(account_id, address);
-            address_to_account_id.insert(address, account_id);
-            
             if i < hot_count {
                 account_categories.insert(account_id, AccountCategory::Hot);
                 hot_accounts.push(account_id);
@@ -69,7 +59,6 @@ impl WeightedAddressPool {
                 long_tail_accounts.push(account_id);
             }
         }
-        drop(gen);
 
         let mut account_status = HashMap::new();
         let mut hot_ready_accounts = Vec::new();
@@ -90,8 +79,6 @@ impl WeightedAddressPool {
         let inner = Inner {
             account_categories,
             all_account_ids,
-            account_id_to_address,
-            address_to_account_id,
             account_status,
             hot_ready_accounts,
             normal_ready_accounts,
@@ -100,6 +87,7 @@ impl WeightedAddressPool {
 
         Self {
             inner: Mutex::new(inner),
+            account_generator,
         }
     }
 
@@ -253,12 +241,14 @@ impl AddressPool for WeightedAddressPool {
 
     fn select_receiver(&self, excluded: &Address) -> Address {
         let inner = self.inner.lock();
-        let excluded_id = inner.address_to_account_id.get(excluded);
+        let gen = tokio::runtime::Handle::current().block_on(self.account_generator.read());
+        
+        let excluded_id = gen.get_id_by_address(excluded);
         loop {
             let idx = rand::random::<usize>() % inner.all_account_ids.len();
             let account_id = inner.all_account_ids[idx];
-            if Some(&account_id) != excluded_id {
-                return *inner.account_id_to_address.get(&account_id).unwrap();
+            if Some(account_id) != excluded_id {
+                return gen.get_address_by_id(account_id);
             }
         }
     }
