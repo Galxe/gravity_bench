@@ -101,6 +101,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                                 from_account: Arc::new(address),
                                 nonce: *nonce as u64,
                                 txn_id: Uuid::new_v4(),
+                                from_account_id: *from_account_id,
                                 plan_id: plan_id.clone(),
                             });
                             let tx_envelope =
@@ -208,11 +209,10 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                                 )
                                 .unwrap();
                             txs.into_iter()
-                                .map(|tx_envelope| {
+                                .map(|(from_account_id, tx_envelope)| {
                                     let metadata = Arc::new(TxnMetadata {
-                                        from_account: Arc::new(
-                                            tx_envelope.recover_signer_unchecked().unwrap(),
-                                        ),
+                                        from_account: Arc::new(account_generator.get_address_by_id(from_account_id)),
+                                        from_account_id: from_account_id,
                                         nonce: 0,
                                         txn_id: Uuid::new_v4(),
                                         plan_id: plan_id.clone(),

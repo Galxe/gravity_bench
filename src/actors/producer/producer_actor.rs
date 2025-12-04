@@ -185,7 +185,7 @@ impl Producer {
                 tracing::debug!("Producer is paused");
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            let account_id = account_generator.get_id_by_address(&signed_txn.metadata.from_account).unwrap();
+            let account_id = signed_txn.metadata.from_account_id;
             let next_nonce = match nonce_cache.get(&account_id) {
                 Some(nonce) => *nonce,
                 None => 0,
@@ -415,7 +415,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
             }
             SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                 self.stats.success_txns += 1;
-                let account_id = account_generator.get_id_by_address(&account).unwrap();
+                let account_id = msg.metadata.from_account_id;
                 self.nonce_cache
                     .insert(account_id, *expect_nonce as u32);
             }
@@ -426,27 +426,23 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
-                let account_id = account_generator.get_id_by_address(&account);
-                if let Some(account_id) = account_id {
-                    match msg.result.as_ref() {
-                        SubmissionResult::Success(_) => {
-                            address_pool.unlock_next_nonce(account_id);
-                        }
-                        SubmissionResult::NonceTooLow { expect_nonce, .. } => {
-                            tracing::debug!(
-                                "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                                account,
-                                expect_nonce,
-                                msg.metadata.nonce
-                            );
-                            address_pool.unlock_correct_nonce(account_id, *expect_nonce as u32);
-                        }
-                        SubmissionResult::ErrorWithRetry => {
-                            address_pool.retry_current_nonce(account_id);
-                        }
+            let account_id = msg.metadata.from_account_id;
+                match msg.result.as_ref() {
+                    SubmissionResult::Success(_) => {
+                        address_pool.unlock_next_nonce(account_id);
                     }
-                } else {
-                    tracing::warn!("Account {:?} not found in account generator", account);
+                    SubmissionResult::NonceTooLow { expect_nonce, .. } => {
+                        tracing::debug!(
+                            "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
+                            account,
+                            expect_nonce,
+                            msg.metadata.nonce
+                        );
+                        address_pool.unlock_correct_nonce(account_id, *expect_nonce as u32);
+                    }
+                    SubmissionResult::ErrorWithRetry => {
+                        address_pool.retry_current_nonce(account_id);
+                    }
                 }
                 ready_accounts.store(address_pool.ready_len() as u64, Ordering::Relaxed);
             }

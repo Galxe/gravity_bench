@@ -21,6 +21,7 @@ pub struct TxnMetadata {
     pub txn_id: Uuid,
     pub plan_id: PlanId,
     pub from_account: Arc<Address>,
+    pub from_account_id: AccountId,
     pub nonce: u64,
 }
 
@@ -62,12 +63,13 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
 
 pub trait ToTxnConstructor: Send + Sync + 'static {
     /// Build transaction based on receiver information.
+    /// return the from account id and the transaction envelope
     fn build_for_receiver(
         &self,
         to_account_id: AccountId,
         account_generator: AccountManager,
         chain_id: u64,
-    ) -> Result<Vec<TxEnvelope>, anyhow::Error>;
+    ) -> Result<Vec<(AccountId, TxEnvelope)>, anyhow::Error>;
 
     /// Provide transaction description.
     fn description(&self) -> &'static str;

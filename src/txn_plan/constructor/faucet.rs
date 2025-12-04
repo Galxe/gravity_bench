@@ -2,7 +2,7 @@ use crate::{
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
-    util::gen_account::AccountGenerator,
+    util::gen_account::{AccountGenerator, AccountId},
 };
 use alloy::{
     primitives::{Address, U256},
@@ -22,8 +22,8 @@ static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>
     std::sync::OnceLock::new();
 
 pub struct FaucetTreePlanBuilder<T: FaucetTxnBuilder> {
-    faucet: Arc<PrivateKeySigner>,
-    account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
+    faucet_id: AccountId,
+    account_levels: Vec<Vec<AccountId>>,
     final_recipients: Arc<Vec<Arc<Address>>>,
     amount_per_recipient: U256,
     nonce_map: Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>,
@@ -118,12 +118,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
                 let account_ids = account_generator
                     .gen_account(start_index as u64, num_accounts_at_level as u64)
                     .unwrap();
-                account_levels.push(
-                    account_ids
-                        .iter()
-                        .map(|&id| Arc::new(account_generator.get_signer_by_id(id).clone()))
-                        .collect::<Vec<_>>(),
-                );
+                account_levels.push(account_ids);
                 start_index += num_accounts_at_level as usize;
             }
         }
@@ -137,15 +132,16 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             for level in &account_levels {
                 for acc in level {
+                    let address = account_generator.get_address_by_id(*acc);
                     nonce_map
-                        .entry(acc.address())
+                        .entry(address)
                         .or_insert_with(|| Arc::new(AtomicU64::new(0)));
                 }
             }
         }
         info!("FaucetTreePlanBuilder: balance={:?}, amount_per_recipient={:?}, intermediate_funding_amounts={:?}, accounts_levels={:?}, accounts_num={:?}", faucet_balance, amount_per_recipient, intermediate_funding_amounts, account_levels.len(), total_accounts);
         Self {
-            faucet: Arc::new(faucet),
+            faucet_id: account_generator.faucet_accout_id(),
             account_levels,
             final_recipients,
             amount_per_recipient,
@@ -184,9 +180,9 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         }
     }
 
-    fn get_senders_for_level(&self, level: usize) -> Vec<Arc<PrivateKeySigner>> {
+    fn get_senders_for_level(&self, level: usize) -> Vec<AccountId> {
         if level == 0 {
-            vec![self.faucet.clone()]
+            vec![self.faucet_id]
         } else {
             self.account_levels[level - 1].clone()
         }

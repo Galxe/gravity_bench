@@ -21,7 +21,6 @@ pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
     faucet_accout: PrivateKeySigner,
     faucet_accout_id: AccountId,
-    accout_to_id: HashMap<Address, AccountId>,
     init_nonces: Vec<Arc<AtomicU64>>,
 }
 
@@ -30,11 +29,10 @@ pub type AccountManager = Arc<AccountGenerator>;
 impl AccountGenerator {
     pub fn with_capacity(capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
         Self {
-            accouts: Vec::with_capacity(capacity),
+            accouts: Vec::new(),
             faucet_accout,
             faucet_accout_id: AccountId(u32::MAX),
-            accout_to_id: HashMap::with_capacity(capacity),
-            init_nonces: Vec::with_capacity(capacity),
+            init_nonces: Vec::new(),
         }
     }
 
@@ -50,19 +48,15 @@ impl AccountGenerator {
         }
     }
 
+    pub fn faucet_accout_id(&self) -> AccountId {
+        self.faucet_accout_id
+    }
+
     pub fn get_address_by_id(&self, id: AccountId) -> Address {
         if id == self.faucet_accout_id {
             self.faucet_accout.address()
         } else {
             self.accouts[id.0 as usize].address()
-        }
-    }
-
-    pub fn get_id_by_address(&self, address: &Address) -> Option<AccountId> {
-        if address == &self.faucet_accout.address() {
-            Some(self.faucet_accout_id)
-        } else {
-            self.accout_to_id.get(address).copied()
         }
     }
 
@@ -90,10 +84,6 @@ impl AccountGenerator {
             self.accouts.extend(res);
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
-            for i in begin_index..end_index {
-                self.accout_to_id
-                    .insert(self.accouts[i as usize].address(), AccountId(i as u32));
-            }
         }
         let mut res = Vec::new();
         for i in 0..size {

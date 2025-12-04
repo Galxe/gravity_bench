@@ -4,7 +4,7 @@ use crate::{
         faucet_txn_builder::FaucetTxnBuilder,
         traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
     },
-    util::gen_account::AccountManager,
+    util::gen_account::{AccountId, AccountManager},
 };
 use alloy::{
     eips::Encodable2718,
@@ -32,9 +32,9 @@ pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     execution_mode: PlanExecutionMode,
     chain_id: u64,
     level: usize,
-    senders: Vec<Arc<PrivateKeySigner>>,
+    senders: Vec<AccountId>,
     final_recipients: Arc<Vec<Arc<Address>>>,
-    account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
+    account_levels: Vec<Vec<AccountId>>,
     amount_per_recipient: U256,
     intermediate_funding_amounts: Vec<U256>,
     degree: usize,
@@ -51,9 +51,9 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
         chain_id: u64,
         level: usize,
         account_init_nonce: Arc<HashMap<Address, u64>>,
-        senders: Vec<Arc<PrivateKeySigner>>,
+        senders: Vec<AccountId>,
         final_recipients: Arc<Vec<Arc<Address>>>,
-        account_levels: Vec<Vec<Arc<PrivateKeySigner>>>,
+        account_levels: Vec<Vec<AccountId>>,
         amount_per_recipient: U256,
         intermediate_funding_amounts: Vec<U256>,
         degree: usize,
@@ -108,7 +108,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
     fn build_txns(
         &mut self,
         _ready_accounts: Vec<(crate::util::gen_account::AccountId, u32)>,
-        _account_generator: AccountManager,
+        account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
@@ -132,7 +132,8 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                     chunk
                         .into_par_iter()
                         .enumerate()
-                        .for_each(|(sender_index, sender_signer)| {
+                        .for_each(|(sender_index, sender_signer_id)| {
+                            let sender_signer = account_generator.get_signer_by_id(*sender_signer_id);
                             let start_index = (chunk_index * 1024 + sender_index) * degree;
                             let end_index = (start_index + degree).min(final_recipients.len());
                             if end_index < start_index {
@@ -144,7 +145,8 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                     let val = amount_per_recipient;
                                     (to, val)
                                 } else {
-                                    let to = account_levels[level][i].address();
+                                    let to_id = account_levels[level][i];
+                                    let to = account_generator.get_address_by_id(to_id);
                                     let val = intermediate_funding_amounts[level];
                                     (Arc::new(to), val)
                                 };
@@ -173,6 +175,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                 let metadata = Arc::new(TxnMetadata {
                                     from_account: Arc::new(sender_signer.address()),
                                     nonce,
+                                    from_account_id: *sender_signer_id,
                                     txn_id: Uuid::new_v4(),
                                     plan_id: plan_id.clone(),
                                 });
