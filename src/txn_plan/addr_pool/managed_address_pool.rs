@@ -1,10 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use parking_lot::Mutex;
-use tokio::sync::RwLock;
 
 use super::AddressPool;
-use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
+use crate::util::gen_account::{AccountId, AccountManager};
 
 struct Inner {
     account_status: HashMap<AccountId, u32>,
@@ -22,7 +21,7 @@ impl RandomAddressPool {
     pub fn new(account_ids: Vec<AccountId>, account_generator: AccountManager) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
-        
+
         for &account_id in account_ids.iter() {
             // assume all address start from nonce, this is correct beacause a nonce too low error will trigger correct nonce
             let nonce = 0;
@@ -112,7 +111,7 @@ impl AddressPool for RandomAddressPool {
 
     fn select_receiver(&self, excluded: AccountId) -> AccountId {
         let inner = self.inner.lock();
-        
+
         loop {
             let idx = rand::random::<usize>() % inner.all_account_ids.len();
             let account_id = inner.all_account_ids[idx];

@@ -1,12 +1,13 @@
-use std::sync::Arc;
-
 use alloy::{
     primitives::{Address, U256},
     rpc::types::TransactionRequest,
-    signers::local::PrivateKeySigner,
 };
 
-use crate::{eth::TxnBuilder, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId, AccountManager}};
+use crate::{
+    eth::TxnBuilder,
+    txn_plan::traits::FromTxnConstructor,
+    util::gen_account::{AccountId, AccountManager},
+};
 
 /// Token distribute constructor
 /// Distribute tokens to accounts using ETH

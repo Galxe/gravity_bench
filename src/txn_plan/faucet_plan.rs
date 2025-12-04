@@ -3,7 +3,8 @@ use crate::{
     txn_plan::{
         faucet_txn_builder::FaucetTxnBuilder,
         traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
-    }, util::gen_account::AccountManager,
+    },
+    util::gen_account::AccountManager,
 };
 use alloy::{
     eips::Encodable2718,

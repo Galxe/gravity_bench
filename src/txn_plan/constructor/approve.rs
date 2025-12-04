@@ -1,14 +1,15 @@
-use std::sync::Arc;
-
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
     rpc::types::TransactionRequest,
-    signers::local::PrivateKeySigner,
     sol_types::SolCall,
 };
 
-use crate::{config::IERC20, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId, AccountManager}};
+use crate::{
+    config::IERC20,
+    txn_plan::traits::FromTxnConstructor,
+    util::gen_account::{AccountId, AccountManager},
+};
 
 /// ERC20 approve constructor
 /// Approve tokens for multiple accounts to a specified spender (e.g. Uniswap Router)

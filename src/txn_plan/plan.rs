@@ -1,20 +1,18 @@
 use crate::{
     eth::TxnBuilder,
     txn_plan::{
-        TxnIter, traits::{
+        traits::{
             FromTxnConstructor, PlanExecutionMode, PlanId, SignedTxnWithMetadata, ToTxnConstructor,
             TxnMetadata, TxnPlan,
-        }
+        },
+        TxnIter,
     },
-    util::gen_account::{AccountGenerator, AccountId, AccountManager},
+    util::gen_account::{AccountId, AccountManager},
 };
-use alloy::{
-    consensus::{TxEnvelope, transaction::SignerRecoverable}, eips::Encodable2718,
-};
+use alloy::{consensus::transaction::SignerRecoverable, eips::Encodable2718};
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Concurrency control parameters
@@ -80,8 +78,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
         let plan_id = self.id.clone();
         let constructor = self.constructor.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
-    
-        
+
         // 4. Create async stream, process in batches
         let handle = tokio::task::spawn_blocking(move || {
             ready_accounts
@@ -91,9 +88,14 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                         .into_par_iter()
                         .map(|(from_account_id, nonce)| {
                             let address = account_generator.get_address_by_id(*from_account_id);
-                            let signer = account_generator.get_signer_by_id(*from_account_id).clone();
+                            let signer =
+                                account_generator.get_signer_by_id(*from_account_id).clone();
                             let tx_request = constructor
-                                .build_for_sender(*from_account_id, account_generator.clone(), *nonce as u64)
+                                .build_for_sender(
+                                    *from_account_id,
+                                    account_generator.clone(),
+                                    *nonce as u64,
+                                )
                                 .unwrap();
                             let metadata = Arc::new(TxnMetadata {
                                 from_account: Arc::new(address),
@@ -102,7 +104,8 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                                 plan_id: plan_id.clone(),
                             });
                             let tx_envelope =
-                                TxnBuilder::build_and_sign_transaction(tx_request, &signer).unwrap();
+                                TxnBuilder::build_and_sign_transaction(tx_request, &signer)
+                                    .unwrap();
                             SignedTxnWithMetadata {
                                 bytes: tx_envelope.encoded_2718(),
                                 metadata,
@@ -185,10 +188,10 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
         let constructor = self.constructor.clone();
         let chain_id = self.chain_id;
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
-        
+
         // Convert AccountId to addresses
         let addresses = ready_accounts;
-        
+
         let handle = tokio::task::spawn_blocking(move || {
             addresses
                 .chunks(1024)
@@ -197,7 +200,13 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                         .into_par_iter()
                         .flat_map(|(to_account_id, _nonce)| {
                             // Build transaction request
-                            let txs = constructor.build_for_receiver(*to_account_id, account_generator.clone(), chain_id).unwrap();
+                            let txs = constructor
+                                .build_for_receiver(
+                                    *to_account_id,
+                                    account_generator.clone(),
+                                    chain_id,
+                                )
+                                .unwrap();
                             txs.into_iter()
                                 .map(|tx_envelope| {
                                     let metadata = Arc::new(TxnMetadata {

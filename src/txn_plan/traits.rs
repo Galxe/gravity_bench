@@ -4,11 +4,9 @@ use actix::Message;
 use alloy::consensus::TxEnvelope;
 use alloy::primitives::Address;
 use alloy::rpc::types::TransactionRequest;
-use alloy::signers::local::PrivateKeySigner;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
+use crate::util::gen_account::{AccountId, AccountManager};
 
 #[derive(Debug, Clone, Message)]
 #[rtype(result = "anyhow::Result<()>")]

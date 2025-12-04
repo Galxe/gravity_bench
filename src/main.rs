@@ -14,18 +14,18 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{
-    io::{AsyncBufReadExt, BufReader as TokioBufReader},
-    sync::RwLock,
-};
+use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tracing::{info, Level};
 
 use crate::{
-    actors::{Monitor, RegisterTxnPlan, consumer::Consumer, producer::Producer},
+    actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        PlanBuilder, TxnPlan, addr_pool::AddressPool, constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}
+        addr_pool::AddressPool,
+        constructor::FaucetTreePlanBuilder,
+        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
+        PlanBuilder, TxnPlan,
     },
     util::gen_account::{AccountGenerator, AccountManager},
 };
@@ -261,7 +261,10 @@ async fn start_bench() -> Result<()> {
         });
         contract_config
     };
-    let mut accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts, PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap());
+    let mut accout_generator = AccountGenerator::with_capacity(
+        benchmark_config.accounts.num_accounts,
+        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap(),
+    );
     let account_ids = accout_generator
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
@@ -280,8 +283,6 @@ async fn start_bench() -> Result<()> {
             Arc::new(client)
         })
         .collect();
-
-
 
     let chain_id = benchmark_config.nodes[0].chain_id;
 
@@ -332,11 +333,14 @@ async fn start_bench() -> Result<()> {
         .unwrap();
         tokens_plan.push(token_faucet_builder);
     }
-    
+
     let account_manager = accout_generator.to_manager();
 
     let address_pool: Arc<dyn AddressPool> = Arc::new(
-        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(account_ids.clone(), account_manager.clone()),
+        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(
+            account_ids.clone(),
+            account_manager.clone(),
+        ),
     );
 
     // Use the same client instances for Consumer to share metrics

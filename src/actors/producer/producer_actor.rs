@@ -5,7 +5,6 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
@@ -15,7 +14,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
-use crate::util::gen_account::{AccountGenerator, AccountManager};
+use crate::util::gen_account::AccountManager;
 
 use super::messages::RegisterTxnPlan;
 
@@ -72,7 +71,7 @@ pub struct Producer {
     consumer_addr: Addr<Consumer>,
 
     nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
-    
+
     account_generator: AccountManager,
 
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
@@ -165,7 +164,9 @@ impl Producer {
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-        let iterator = plan.as_mut().build_txns(ready_accounts, account_generator.clone())?;
+        let iterator = plan
+            .as_mut()
+            .build_txns(ready_accounts, account_generator.clone())?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {

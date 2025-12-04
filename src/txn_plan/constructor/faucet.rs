@@ -13,7 +13,6 @@ use std::{
     marker::PhantomData,
     sync::{atomic::AtomicU64, Arc, Mutex},
 };
-use tokio::sync::RwLock;
 use tracing::info;
 
 // Gas parameters must match the values used in the plan executor.

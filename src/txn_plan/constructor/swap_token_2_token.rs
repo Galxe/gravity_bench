@@ -1,12 +1,12 @@
 use crate::{
     config::{IUniswapV2Router, LiquidityPair},
-    txn_plan::{FromTxnConstructor, addr_pool::AddressPool}, util::gen_account::{AccountGenerator, AccountId, AccountManager},
+    txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
+    util::gen_account::{AccountId, AccountManager},
 };
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
     rpc::types::TransactionRequest,
-    signers::local::PrivateKeySigner,
     sol_types::SolCall,
 };
 use std::{str::FromStr, sync::Arc};

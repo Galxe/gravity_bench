@@ -46,7 +46,7 @@ impl WeightedAddressPool {
         let mut hot_accounts = Vec::with_capacity(hot_count);
         let mut normal_accounts = Vec::with_capacity(normal_count);
         let mut long_tail_accounts = Vec::with_capacity(total_accounts - hot_count - normal_count);
-        
+
         for (i, &account_id) in all_account_ids.iter().enumerate() {
             if i < hot_count {
                 account_categories.insert(account_id, AccountCategory::Hot);
@@ -241,7 +241,7 @@ impl AddressPool for WeightedAddressPool {
 
     fn select_receiver(&self, excluded: AccountId) -> AccountId {
         let inner = self.inner.lock();
-        
+
         loop {
             let idx = rand::random::<usize>() % inner.all_account_ids.len();
             let account_id = inner.all_account_ids[idx];

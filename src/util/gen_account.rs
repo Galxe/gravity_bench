@@ -1,8 +1,10 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, atomic::{AtomicU64, Ordering}
-    }, u32,
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    u32,
 };
 
 use alloy::{
@@ -11,7 +13,6 @@ use alloy::{
 };
 use anyhow::{Context, Result};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AccountId(u32);
@@ -81,11 +82,7 @@ impl AccountGenerator {
         (0..self.accouts.len()).map(|i| (AccountId(i as u32), self.init_nonces[i].clone()))
     }
 
-    pub fn gen_account(
-        &mut self,
-        start_index: u64,
-        size: u64,
-    ) -> Result<Vec<AccountId>> {
+    pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<Vec<AccountId>> {
         let begin_index = self.accouts.len() as u64;
         let end_index = start_index + size;
         if begin_index < end_index {

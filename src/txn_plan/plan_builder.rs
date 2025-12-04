@@ -4,7 +4,6 @@ use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
 };
-use tokio::sync::RwLock;
 
 use crate::{
     config::LiquidityPair,
