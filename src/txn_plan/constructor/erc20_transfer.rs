@@ -1,12 +1,12 @@
 use crate::{
     config::IERC20,
     txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
+    util::gen_account::{AccountId, AccountManager},
 };
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
     rpc::types::TransactionRequest,
-    signers::local::PrivateKeySigner,
     sol_types::SolCall,
 };
 use std::sync::Arc;
@@ -39,13 +39,14 @@ impl Erc20TransferConstructor {
 impl FromTxnConstructor for Erc20TransferConstructor {
     fn build_for_sender(
         &self,
-        from_account: &Arc<Address>,
-        from_signer: &Arc<PrivateKeySigner>,
+        from_account_id: AccountId,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // random select a receiver address, ensure not to self
-        let to_address = self.address_pool.select_receiver(from_account);
-
+        let to_address = self.address_pool.select_receiver(from_account_id);
+        let to_address = account_generator.get_address_by_id(to_address);
+        let from_address = account_generator.get_address_by_id(from_account_id);
         // build ERC20 transfer call
         let transfer_call = IERC20::transferCall {
             to: to_address,
@@ -58,7 +59,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
         let token_address = self.token_list[token_idx];
         // create transaction request
         let tx_request = TransactionRequest::default()
-            .with_from(from_signer.address())
+            .with_from(from_address)
             .with_to(token_address)
             .with_input(call_data)
             .with_nonce(nonce)

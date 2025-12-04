@@ -1,12 +1,12 @@
 use crate::{
     config::{IUniswapV2Router, LiquidityPair},
     txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
+    util::gen_account::{AccountId, AccountManager},
 };
 use alloy::{
     network::TransactionBuilder,
     primitives::{Address, Bytes, U256},
     rpc::types::TransactionRequest,
-    signers::local::PrivateKeySigner,
     sol_types::SolCall,
 };
 use std::{str::FromStr, sync::Arc};
@@ -40,11 +40,13 @@ impl SwapTokenToTokenConstructor {
 impl FromTxnConstructor for SwapTokenToTokenConstructor {
     fn build_for_sender(
         &self,
-        from_account: &Arc<Address>,
-        from_signer: &Arc<PrivateKeySigner>,
+        from_account_id: AccountId,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
-        let to_address = self.address_pool.select_receiver(from_account);
+        let to_address = self.address_pool.select_receiver(from_account_id);
+        let to_address = account_generator.get_address_by_id(to_address);
+        let from_address = account_generator.get_address_by_id(from_account_id);
         let token_idx = rand::random::<usize>() % self.token_list.len();
         let from_token = Address::from_str(&self.token_list[token_idx].token_a_address).unwrap();
         let to_token = Address::from_str(&self.token_list[token_idx].token_b_address).unwrap();
@@ -65,7 +67,7 @@ impl FromTxnConstructor for SwapTokenToTokenConstructor {
         let call_data = swap_call.abi_encode();
         let call_data = Bytes::from(call_data);
         let tx_request = TransactionRequest::default()
-            .with_from(from_signer.address())
+            .with_from(from_address)
             .with_to(self.router_address)
             .with_input(call_data)
             .with_nonce(nonce)

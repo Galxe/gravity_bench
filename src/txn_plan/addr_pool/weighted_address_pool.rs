@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use alloy::{primitives::Address, signers::local::PrivateKeySigner};
+use alloy::primitives::Address;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
+use tokio::sync::RwLock;
 
 use super::AddressPool;
+use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum AccountCategory {
@@ -15,29 +17,28 @@ enum AccountCategory {
 
 struct Inner {
     // Static data
-    account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>,
-    account_categories: HashMap<Arc<Address>, AccountCategory>,
-    all_account_addresses: Vec<Arc<Address>>,
+    account_categories: HashMap<AccountId, AccountCategory>,
+    all_account_ids: Vec<AccountId>,
 
     // Dynamic data
-    account_status: HashMap<Arc<Address>, u32>,
-    hot_ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
-    normal_ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
-    long_tail_ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+    account_status: HashMap<AccountId, u32>,
+    hot_ready_accounts: Vec<(AccountId, u32)>,
+    normal_ready_accounts: Vec<(AccountId, u32)>,
+    long_tail_ready_accounts: Vec<(AccountId, u32)>,
 }
 
 pub struct WeightedAddressPool {
     inner: Mutex<Inner>,
+    account_generator: AccountManager,
 }
 
 impl WeightedAddressPool {
-    pub fn new(account_signers: HashMap<Arc<Address>, Arc<PrivateKeySigner>>) -> Self {
-        let mut all_account_addresses: Vec<Arc<Address>> =
-            account_signers.keys().cloned().collect();
+    pub fn new(account_ids: Vec<AccountId>, account_generator: AccountManager) -> Self {
+        let mut all_account_ids = account_ids;
         // Shuffle for random distribution
-        all_account_addresses.shuffle(&mut rand::thread_rng());
+        all_account_ids.shuffle(&mut rand::thread_rng());
 
-        let total_accounts = all_account_addresses.len();
+        let total_accounts = all_account_ids.len();
         let hot_count = (total_accounts as f64 * 0.2).round() as usize;
         let normal_count = (total_accounts as f64 * 0.1).round() as usize;
 
@@ -46,16 +47,16 @@ impl WeightedAddressPool {
         let mut normal_accounts = Vec::with_capacity(normal_count);
         let mut long_tail_accounts = Vec::with_capacity(total_accounts - hot_count - normal_count);
 
-        for (i, addr) in all_account_addresses.iter().enumerate() {
+        for (i, &account_id) in all_account_ids.iter().enumerate() {
             if i < hot_count {
-                account_categories.insert(addr.clone(), AccountCategory::Hot);
-                hot_accounts.push(addr.clone());
+                account_categories.insert(account_id, AccountCategory::Hot);
+                hot_accounts.push(account_id);
             } else if i < hot_count + normal_count {
-                account_categories.insert(addr.clone(), AccountCategory::Normal);
-                normal_accounts.push(addr.clone());
+                account_categories.insert(account_id, AccountCategory::Normal);
+                normal_accounts.push(account_id);
             } else {
-                account_categories.insert(addr.clone(), AccountCategory::LongTail);
-                long_tail_accounts.push(addr.clone());
+                account_categories.insert(account_id, AccountCategory::LongTail);
+                long_tail_accounts.push(account_id);
             }
         }
 
@@ -64,11 +65,11 @@ impl WeightedAddressPool {
         let mut normal_ready_accounts = Vec::new();
         let mut long_tail_ready_accounts = Vec::new();
 
-        for (addr, signer) in &account_signers {
+        for &account_id in &all_account_ids {
             let nonce = 0;
-            account_status.insert(addr.clone(), nonce);
-            let ready_tuple = (signer.clone(), addr.clone(), nonce);
-            match account_categories.get(addr).unwrap() {
+            account_status.insert(account_id, nonce);
+            let ready_tuple = (account_id, nonce);
+            match account_categories.get(&account_id).unwrap() {
                 AccountCategory::Hot => hot_ready_accounts.push(ready_tuple),
                 AccountCategory::Normal => normal_ready_accounts.push(ready_tuple),
                 AccountCategory::LongTail => long_tail_ready_accounts.push(ready_tuple),
@@ -76,9 +77,8 @@ impl WeightedAddressPool {
         }
 
         let inner = Inner {
-            account_signers,
             account_categories,
-            all_account_addresses,
+            all_account_ids,
             account_status,
             hot_ready_accounts,
             normal_ready_accounts,
@@ -87,10 +87,11 @@ impl WeightedAddressPool {
 
         Self {
             inner: Mutex::new(inner),
+            account_generator,
         }
     }
 
-    fn unlock_account(&self, account: Arc<Address>, nonce: Option<u32>) {
+    fn unlock_account(&self, account: AccountId, nonce: Option<u32>) {
         let mut inner = self.inner.lock();
         if let Some(current_nonce) = inner.account_status.get_mut(&account) {
             let new_nonce = match nonce {
@@ -99,8 +100,7 @@ impl WeightedAddressPool {
             };
             *current_nonce = new_nonce;
 
-            let signer = inner.account_signers.get(&account).unwrap().clone();
-            let ready_tuple = (signer, account.clone(), new_nonce);
+            let ready_tuple = (account, new_nonce);
 
             match inner.account_categories.get(&account).unwrap() {
                 AccountCategory::Hot => inner.hot_ready_accounts.push(ready_tuple),
@@ -112,7 +112,7 @@ impl WeightedAddressPool {
 }
 
 impl AddressPool for WeightedAddressPool {
-    fn fetch_senders(&self, count: usize) -> Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)> {
+    fn fetch_senders(&self, count: usize) -> Vec<(AccountId, u32)> {
         let mut inner = self.inner.lock();
         let mut result = Vec::with_capacity(count);
 
@@ -154,32 +154,32 @@ impl AddressPool for WeightedAddressPool {
     }
 
     fn clean_ready_accounts(&self) {
-        self.inner.lock().hot_ready_accounts.clear();
-        self.inner.lock().normal_ready_accounts.clear();
-        self.inner.lock().long_tail_ready_accounts.clear();
+        let mut inner = self.inner.lock();
+        inner.hot_ready_accounts.clear();
+        inner.normal_ready_accounts.clear();
+        inner.long_tail_ready_accounts.clear();
     }
 
-    fn unlock_next_nonce(&self, account: Arc<Address>) {
+    fn unlock_next_nonce(&self, account: AccountId) {
         self.unlock_account(account, None);
     }
 
-    fn unlock_correct_nonce(&self, account: Arc<Address>, nonce: u32) {
+    fn unlock_correct_nonce(&self, account: AccountId, nonce: u32) {
         self.unlock_account(account, Some(nonce));
     }
 
-    fn retry_current_nonce(&self, account: Arc<Address>) {
+    fn retry_current_nonce(&self, account: AccountId) {
         let mut inner = self.inner.lock();
 
         let maybe_data = if let Some(nonce) = inner.account_status.get(&account) {
-            let signer = inner.account_signers.get(&account).unwrap().clone();
             let category = *inner.account_categories.get(&account).unwrap();
-            Some((*nonce, signer, category))
+            Some((*nonce, category))
         } else {
             None
         };
 
-        if let Some((nonce, signer, category)) = maybe_data {
-            let ready_tuple = (signer, account.clone(), nonce);
+        if let Some((nonce, category)) = maybe_data {
+            let ready_tuple = (account, nonce);
             match category {
                 AccountCategory::Hot => inner.hot_ready_accounts.push(ready_tuple),
                 AccountCategory::Normal => inner.normal_ready_accounts.push(ready_tuple),
@@ -197,17 +197,16 @@ impl AddressPool for WeightedAddressPool {
         let mut normal_ready_accounts = Vec::new();
         let mut long_tail_ready_accounts = Vec::new();
 
-        for account in &inner.all_account_addresses {
-            let maybe_data = if let Some(nonce) = inner.account_status.get(account) {
-                let signer = inner.account_signers.get(account).unwrap().clone();
-                let category = *inner.account_categories.get(account).unwrap();
-                Some((*nonce, signer, category))
+        for &account_id in &inner.all_account_ids {
+            let maybe_data = if let Some(nonce) = inner.account_status.get(&account_id) {
+                let category = *inner.account_categories.get(&account_id).unwrap();
+                Some((*nonce, category))
             } else {
                 None
             };
 
-            if let Some((nonce, signer, category)) = maybe_data {
-                let ready_tuple = (signer, account.clone(), nonce);
+            if let Some((nonce, category)) = maybe_data {
+                let ready_tuple = (account_id, nonce);
                 match category {
                     AccountCategory::Hot => hot_ready_accounts.push(ready_tuple),
                     AccountCategory::Normal => normal_ready_accounts.push(ready_tuple),
@@ -226,7 +225,7 @@ impl AddressPool for WeightedAddressPool {
         let ready_count = inner.hot_ready_accounts.len()
             + inner.normal_ready_accounts.len()
             + inner.long_tail_ready_accounts.len();
-        ready_count == inner.all_account_addresses.len()
+        ready_count == inner.all_account_ids.len()
     }
 
     fn ready_len(&self) -> usize {
@@ -237,16 +236,17 @@ impl AddressPool for WeightedAddressPool {
     }
 
     fn len(&self) -> usize {
-        self.inner.lock().account_signers.len()
+        self.inner.lock().all_account_ids.len()
     }
 
-    fn select_receiver(&self, excluded: &Address) -> Address {
+    fn select_receiver(&self, excluded: AccountId) -> AccountId {
         let inner = self.inner.lock();
+
         loop {
-            let idx = rand::random::<usize>() % inner.all_account_addresses.len();
-            let to_address = inner.all_account_addresses[idx].clone();
-            if to_address.as_ref() != excluded {
-                return *to_address;
+            let idx = rand::random::<usize>() % inner.all_account_ids.len();
+            let account_id = inner.all_account_ids[idx];
+            if account_id != excluded {
+                return account_id;
             }
         }
     }

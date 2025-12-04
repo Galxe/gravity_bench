@@ -1,11 +1,9 @@
 use actix::prelude::*;
-use alloy::primitives::Address;
 use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
@@ -15,7 +13,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
-use crate::util::gen_account::AccountGenerator;
+use crate::util::gen_account::{AccountId, AccountManager};
 
 use super::messages::RegisterTxnPlan;
 
@@ -71,7 +69,9 @@ pub struct Producer {
     monitor_addr: Addr<Monitor>,
     consumer_addr: Addr<Consumer>,
 
-    nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+    nonce_cache: Arc<DashMap<AccountId, u32>>,
+
+    account_generator: AccountManager,
 
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
     plan_queue: VecDeque<Box<dyn TxnPlan>>,
@@ -86,16 +86,14 @@ impl Producer {
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: AccountManager,
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
-        let account_generator = account_generator.read().await;
         address_pool.clean_ready_accounts();
-        for (account, nonce) in account_generator.accouts_nonce_iter() {
-            let address = Arc::new(account.address());
+        for (account_id, nonce) in account_generator.account_ids_with_nonce() {
             let nonce = nonce.load(Ordering::Relaxed) as u32;
-            nonce_cache.insert(address.clone(), nonce);
-            address_pool.unlock_correct_nonce(address.clone(), nonce);
+            nonce_cache.insert(account_id, nonce);
+            address_pool.unlock_correct_nonce(account_id, nonce);
         }
         Ok(Self {
             state: ProducerState::running(),
@@ -110,6 +108,7 @@ impl Producer {
             },
             address_pool,
             nonce_cache,
+            account_generator,
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
@@ -152,17 +151,20 @@ impl Producer {
         monitor_addr: Addr<Monitor>,
         consumer_addr: Addr<Consumer>,
         address_pool: Arc<dyn AddressPool>,
+        account_generator: AccountManager,
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
-        nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+        nonce_cache: Arc<DashMap<AccountId, u32>>,
     ) -> Result<(), anyhow::Error> {
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-        let iterator = plan.as_mut().build_txns(ready_accounts)?;
+        let iterator = plan
+            .as_mut()
+            .build_txns(ready_accounts, account_generator.clone())?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {
@@ -183,7 +185,8 @@ impl Producer {
                 tracing::debug!("Producer is paused");
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            let next_nonce = match nonce_cache.get(signed_txn.metadata.from_account.as_ref()) {
+            let account_id = signed_txn.metadata.from_account_id;
+            let next_nonce = match nonce_cache.get(&account_id) {
                 Some(nonce) => *nonce,
                 None => 0,
             };
@@ -269,6 +272,7 @@ impl Handler<ExeFrontPlan> for Producer {
         let plan = self.plan_queue.pop_front().unwrap();
         self.stats.remain_plans_num -= 1;
         let address_pool = self.address_pool.clone();
+        let account_generator = self.account_generator.clone();
         let monitor_addr = self.monitor_addr.clone();
         let consumer_addr = self.consumer_addr.clone();
         let self_addr = ctx.address();
@@ -292,6 +296,7 @@ impl Handler<ExeFrontPlan> for Producer {
                     monitor_addr,
                     consumer_addr,
                     address_pool,
+                    account_generator,
                     plan,
                     sending_txns,
                     state,
@@ -401,7 +406,6 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
-        let account = msg.metadata.from_account.clone();
         self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
@@ -409,8 +413,8 @@ impl Handler<UpdateSubmissionResult> for Producer {
             }
             SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                 self.stats.success_txns += 1;
-                self.nonce_cache
-                    .insert(account.clone(), *expect_nonce as u32);
+                let account_id = msg.metadata.from_account_id;
+                self.nonce_cache.insert(account_id, *expect_nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
@@ -419,21 +423,22 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
+                let account_id = msg.metadata.from_account_id;
                 match msg.result.as_ref() {
                     SubmissionResult::Success(_) => {
-                        address_pool.unlock_next_nonce(account);
+                        address_pool.unlock_next_nonce(account_id);
                     }
                     SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                         tracing::debug!(
                             "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                            account,
+                            account_id,
                             expect_nonce,
                             msg.metadata.nonce
                         );
-                        address_pool.unlock_correct_nonce(account, *expect_nonce as u32);
+                        address_pool.unlock_correct_nonce(account_id, *expect_nonce as u32);
                     }
                     SubmissionResult::ErrorWithRetry => {
-                        address_pool.retry_current_nonce(account);
+                        address_pool.retry_current_nonce(account_id);
                     }
                 }
                 ready_accounts.store(address_pool.ready_len() as u64, Ordering::Relaxed);

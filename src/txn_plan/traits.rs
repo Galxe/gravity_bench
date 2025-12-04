@@ -4,8 +4,9 @@ use actix::Message;
 use alloy::consensus::TxEnvelope;
 use alloy::primitives::Address;
 use alloy::rpc::types::TransactionRequest;
-use alloy::signers::local::PrivateKeySigner;
 use uuid::Uuid;
+
+use crate::util::gen_account::{AccountId, AccountManager};
 
 #[derive(Debug, Clone, Message)]
 #[rtype(result = "anyhow::Result<()>")]
@@ -20,6 +21,7 @@ pub struct TxnMetadata {
     pub txn_id: Uuid,
     pub plan_id: PlanId,
     pub from_account: Arc<Address>,
+    pub from_account_id: AccountId,
     pub nonce: u64,
 }
 
@@ -50,8 +52,8 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
     /// The `to` address is usually a field of the constructor itself (e.g., fixed spender or router address).
     fn build_for_sender(
         &self,
-        from_account: &Arc<Address>,
-        from_signer: &Arc<PrivateKeySigner>,
+        from_account_id: AccountId,
+        accout_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error>;
 
@@ -61,11 +63,13 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
 
 pub trait ToTxnConstructor: Send + Sync + 'static {
     /// Build transaction based on receiver information.
+    /// return the from account id and the transaction envelope
     fn build_for_receiver(
         &self,
-        to: &Arc<Address>,
+        to_account_id: AccountId,
+        account_generator: AccountManager,
         chain_id: u64,
-    ) -> Result<Vec<TxEnvelope>, anyhow::Error>;
+    ) -> Result<Vec<(AccountId, TxEnvelope)>, anyhow::Error>;
 
     /// Provide transaction description.
     fn description(&self) -> &'static str;
@@ -84,12 +88,12 @@ pub struct TxnIter {
 pub trait TxnPlan: Send + Sync {
     /// Builds and signs a vector of transactions based on the plan's logic.
     ///
-    /// This method should read from the `AccountManager` to get available accounts and their nonces,
-    /// but it should NOT mutate the manager. All state changes will be handled by the Producer
-    /// after the transactions are built.
+    /// This method receives ready account IDs with their nonces and uses the AccountGenerator
+    /// to retrieve the actual signers and addresses needed for transaction construction.
     fn build_txns(
         &mut self,
-        ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+        ready_accounts: Vec<(AccountId, u32)>,
+        account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error>;
 
     /// Returns the unique identifier for this plan instance.
