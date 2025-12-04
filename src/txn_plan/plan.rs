@@ -9,7 +9,7 @@ use crate::{
     },
     util::gen_account::{AccountId, AccountManager},
 };
-use alloy::{consensus::transaction::SignerRecoverable, eips::Encodable2718};
+use alloy::eips::Encodable2718;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::sync::Arc;

@@ -27,7 +27,7 @@ pub struct AccountGenerator {
 pub type AccountManager = Arc<AccountGenerator>;
 
 impl AccountGenerator {
-    pub fn with_capacity(capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
+    pub fn with_capacity(_capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
         Self {
             accouts: Vec::new(),
             faucet_accout,

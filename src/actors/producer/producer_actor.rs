@@ -406,8 +406,6 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
-        let account_generator = self.account_generator.clone();
-        let account = msg.metadata.from_account.clone();
         self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
@@ -433,7 +431,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
                     SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                         tracing::debug!(
                             "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                            account,
+                            account_id,
                             expect_nonce,
                             msg.metadata.nonce
                         );

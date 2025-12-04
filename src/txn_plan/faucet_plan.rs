@@ -9,7 +9,6 @@ use crate::{
 use alloy::{
     eips::Encodable2718,
     primitives::{Address, U256},
-    signers::local::PrivateKeySigner,
 };
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::{
