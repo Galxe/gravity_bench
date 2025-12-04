@@ -28,7 +28,7 @@ pub struct AccountGenerator {
 pub type AccountManager = Arc<AccountGenerator>;
 
 impl AccountGenerator {
-    pub fn with_capacity(_capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
+    pub fn with_capacity(faucet_accout: PrivateKeySigner) -> Self {
         Self {
             accout_signers: Vec::new(),
             accout_addresses: Vec::new(),
@@ -38,7 +38,10 @@ impl AccountGenerator {
         }
     }
 
-    pub fn to_manager(self) -> AccountManager {
+    pub fn to_manager(mut self) -> AccountManager {
+        self.accout_signers.shrink_to_fit();
+        self.accout_addresses.shrink_to_fit();
+        self.init_nonces.shrink_to_fit();
         Arc::new(self)
     }
 
@@ -83,12 +86,15 @@ impl AccountGenerator {
         let end_index = start_index + size;
         if begin_index < end_index {
             let res = self.gen_deterministic_accounts(begin_index, end_index);
+            self.accout_addresses.reserve_exact(res.len());
+            self.accout_signers.reserve_exact(res.len());
+            self.init_nonces.reserve(res.len());
             self.accout_addresses.extend(res.iter().map(|signer| signer.address()));
             self.accout_signers.extend(res);
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
         }
-        let mut res = Vec::new();
+        let mut res = Vec::with_capacity(size as usize);
         for i in 0..size {
             res.push(AccountId((start_index + i) as u32));
         }
