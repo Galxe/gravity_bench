@@ -427,7 +427,6 @@ impl Handler<UpdateSubmissionResult> for Producer {
         Box::pin(
             async move {
                 let account_id = account_generator.get_id_by_address(&account);
-                
                 if let Some(account_id) = account_id {
                     match msg.result.as_ref() {
                         SubmissionResult::Success(_) => {
