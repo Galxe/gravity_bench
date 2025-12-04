@@ -24,7 +24,7 @@ pub struct AccountSignerCache {
     size: usize,
 }
 
-impl AccountSignerCache {   
+impl AccountSignerCache {
     pub(crate) fn new(size: usize) -> Self {
         Self {
             signers: Vec::with_capacity(size),
@@ -114,7 +114,9 @@ impl AccountGenerator {
     }
 
     pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&Address, Arc<AtomicU64>)> {
-        self.accout_addresses.iter().zip(self.init_nonces.iter().cloned())
+        self.accout_addresses
+            .iter()
+            .zip(self.init_nonces.iter().cloned())
     }
 
     pub fn account_ids_with_nonce(&self) -> impl Iterator<Item = (AccountId, Arc<AtomicU64>)> + '_ {
@@ -128,9 +130,11 @@ impl AccountGenerator {
             let res = self.gen_deterministic_accounts(begin_index, end_index);
             self.accout_addresses.reserve_exact(res.len());
             self.init_nonces.reserve(res.len());
-            self.accout_addresses.extend(res.iter().map(|signer| signer.address()));
+            self.accout_addresses
+                .extend(res.iter().map(|signer| signer.address()));
             for (i, signer) in res.iter().enumerate() {
-                self.accout_signers.save_signer(signer.clone(), AccountId(i as u32));
+                self.accout_signers
+                    .save_signer(signer.clone(), AccountId(i as u32));
             }
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
