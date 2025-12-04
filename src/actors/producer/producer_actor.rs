@@ -15,7 +15,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
-use crate::util::gen_account::AccountGenerator;
+use crate::util::gen_account::{AccountGenerator, AccountManager};
 
 use super::messages::RegisterTxnPlan;
 
@@ -73,7 +73,7 @@ pub struct Producer {
 
     nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
     
-    account_generator: Arc<RwLock<AccountGenerator>>,
+    account_generator: AccountManager,
 
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
     plan_queue: VecDeque<Box<dyn TxnPlan>>,
@@ -88,18 +88,16 @@ impl Producer {
         address_pool: Arc<dyn AddressPool>,
         consumer_addr: Addr<Consumer>,
         monitor_addr: Addr<Monitor>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: AccountManager,
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
-        let gen = account_generator.read().await;
         address_pool.clean_ready_accounts();
-        for (account_id, nonce) in gen.account_ids_with_nonce() {
-            let address = Arc::new(gen.get_address_by_id(account_id));
+        for (account_id, nonce) in account_generator.account_ids_with_nonce() {
+            let address = Arc::new(account_generator.get_address_by_id(account_id));
             let nonce = nonce.load(Ordering::Relaxed) as u32;
             nonce_cache.insert(address.clone(), nonce);
             address_pool.unlock_correct_nonce(account_id, nonce);
         }
-        drop(gen);
         Ok(Self {
             state: ProducerState::running(),
             stats: ProducerStats {
@@ -156,7 +154,7 @@ impl Producer {
         monitor_addr: Addr<Monitor>,
         consumer_addr: Addr<Consumer>,
         address_pool: Arc<dyn AddressPool>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: AccountManager,
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
@@ -167,8 +165,7 @@ impl Producer {
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-        let account_generator = account_generator.read().await;
-        let iterator = plan.as_mut().build_txns(ready_accounts, &account_generator)?;
+        let iterator = plan.as_mut().build_txns(ready_accounts, account_generator.clone())?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {
@@ -428,9 +425,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
-                let gen = account_generator.read().await;
-                let account_id = gen.get_id_by_address(&account);
-                drop(gen);
+                let account_id = account_generator.get_id_by_address(&account);
                 
                 if let Some(account_id) = account_id {
                     match msg.result.as_ref() {

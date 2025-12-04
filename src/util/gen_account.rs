@@ -24,15 +24,21 @@ pub struct AccountGenerator {
     init_nonces: Vec<Arc<AtomicU64>>,
 }
 
+pub type AccountManager = Arc<AccountGenerator>;
+
 impl AccountGenerator {
-    pub fn with_capacity(capacity: usize, faucet_accout: PrivateKeySigner) -> Arc<RwLock<Self>> {
-        Arc::new(RwLock::new(Self {
+    pub fn with_capacity(capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
+        Self {
             accouts: Vec::with_capacity(capacity),
             faucet_accout,
             faucet_accout_id: AccountId(u32::MAX),
             accout_to_id: HashMap::with_capacity(capacity),
             init_nonces: Vec::with_capacity(capacity),
-        }))
+        }
+    }
+
+    pub fn to_manager(self) -> AccountManager {
+        Arc::new(self)
     }
 
     pub fn get_signer_by_id(&self, id: AccountId) -> &PrivateKeySigner {

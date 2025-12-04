@@ -6,7 +6,7 @@ use rand::seq::SliceRandom;
 use tokio::sync::RwLock;
 
 use super::AddressPool;
-use crate::util::gen_account::{AccountGenerator, AccountId};
+use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum AccountCategory {
@@ -29,11 +29,11 @@ struct Inner {
 
 pub struct WeightedAddressPool {
     inner: Mutex<Inner>,
-    account_generator: Arc<RwLock<AccountGenerator>>,
+    account_generator: AccountManager,
 }
 
 impl WeightedAddressPool {
-    pub fn new(account_ids: Vec<AccountId>, account_generator: Arc<RwLock<AccountGenerator>>) -> Self {
+    pub fn new(account_ids: Vec<AccountId>, account_generator: AccountManager) -> Self {
         let mut all_account_ids = account_ids;
         // Shuffle for random distribution
         all_account_ids.shuffle(&mut rand::thread_rng());

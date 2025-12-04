@@ -1,6 +1,6 @@
 use crate::{
     config::{IUniswapV2Router, LiquidityPair},
-    txn_plan::{FromTxnConstructor, addr_pool::AddressPool}, util::gen_account::{AccountGenerator, AccountId},
+    txn_plan::{FromTxnConstructor, addr_pool::AddressPool}, util::gen_account::{AccountGenerator, AccountId, AccountManager},
 };
 use alloy::{
     network::TransactionBuilder,
@@ -41,7 +41,7 @@ impl FromTxnConstructor for SwapTokenToTokenConstructor {
     fn build_for_sender(
         &self,
         from_account_id: AccountId,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         let to_address = self.address_pool.select_receiver(from_account_id);

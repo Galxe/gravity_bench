@@ -3,7 +3,7 @@ use crate::{
     txn_plan::{
         faucet_txn_builder::FaucetTxnBuilder,
         traits::{PlanExecutionMode, PlanId, SignedTxnWithMetadata, TxnMetadata, TxnPlan},
-    },
+    }, util::gen_account::AccountManager,
 };
 use alloy::{
     eips::Encodable2718,
@@ -107,7 +107,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
     fn build_txns(
         &mut self,
         _ready_accounts: Vec<(crate::util::gen_account::AccountId, u32)>,
-        _account_generator: &crate::util::gen_account::AccountGenerator,
+        _account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);

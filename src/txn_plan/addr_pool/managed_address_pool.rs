@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use tokio::sync::RwLock;
 
 use super::AddressPool;
-use crate::util::gen_account::{AccountGenerator, AccountId};
+use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
 
 struct Inner {
     account_status: HashMap<AccountId, u32>,
@@ -14,12 +14,12 @@ struct Inner {
 
 pub struct RandomAddressPool {
     inner: Mutex<Inner>,
-    account_generator: Arc<RwLock<AccountGenerator>>,
+    account_generator: AccountManager,
 }
 
 impl RandomAddressPool {
     #[allow(unused)]
-    pub fn new(account_ids: Vec<AccountId>, account_generator: Arc<RwLock<AccountGenerator>>) -> Self {
+    pub fn new(account_ids: Vec<AccountId>, account_generator: AccountManager) -> Self {
         let mut account_status = HashMap::new();
         let mut ready_accounts = Vec::new();
         

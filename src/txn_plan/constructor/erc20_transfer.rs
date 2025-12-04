@@ -1,6 +1,6 @@
 use crate::{
     config::IERC20,
-    txn_plan::{FromTxnConstructor, addr_pool::AddressPool}, util::gen_account::{AccountGenerator, AccountId},
+    txn_plan::{FromTxnConstructor, addr_pool::AddressPool}, util::gen_account::{AccountGenerator, AccountId, AccountManager},
 };
 use alloy::{
     network::TransactionBuilder,
@@ -40,7 +40,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
     fn build_for_sender(
         &self,
         from_account_id: AccountId,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // random select a receiver address, ensure not to self

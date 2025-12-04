@@ -6,7 +6,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 
-use crate::{eth::TxnBuilder, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId}};
+use crate::{eth::TxnBuilder, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId, AccountManager}};
 
 /// Token distribute constructor
 /// Distribute tokens to accounts using ETH
@@ -45,7 +45,7 @@ impl FromTxnConstructor for SwapEthToTokenConstructor {
     fn build_for_sender(
         &self,
         from_account_id: AccountId,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // set transaction deadline (current time + 30 minutes)

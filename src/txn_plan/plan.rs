@@ -1,13 +1,12 @@
 use crate::{
     eth::TxnBuilder,
     txn_plan::{
-        traits::{
+        TxnIter, traits::{
             FromTxnConstructor, PlanExecutionMode, PlanId, SignedTxnWithMetadata, ToTxnConstructor,
             TxnMetadata, TxnPlan,
-        },
-        TxnIter,
+        }
     },
-    util::gen_account::{AccountGenerator, AccountId},
+    util::gen_account::{AccountGenerator, AccountId, AccountManager},
 };
 use alloy::{
     consensus::{TxEnvelope, transaction::SignerRecoverable}, eips::Encodable2718,
@@ -76,7 +75,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let constructor = self.constructor.clone();
@@ -91,24 +90,23 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                     chunk
                         .into_par_iter()
                         .map(|(from_account_id, nonce)| {
-                            todo!()
-                            // let address = account_generator.get_address_by_id(*from_account_id);
-                            // let signer = account_generator.get_signer_by_id(*from_account_id).clone();
-                            // let tx_request = constructor
-                            //     .build_for_sender(*from_account_id, account_generator, *nonce as u64)
-                            //     .unwrap();
-                            // let metadata = Arc::new(TxnMetadata {
-                            //     from_account: Arc::new(address),
-                            //     nonce: *nonce as u64,
-                            //     txn_id: Uuid::new_v4(),
-                            //     plan_id: plan_id.clone(),
-                            // });
-                            // let tx_envelope =
-                            //     TxnBuilder::build_and_sign_transaction(tx_request, &signer).unwrap();
-                            // SignedTxnWithMetadata {
-                            //     bytes: tx_envelope.encoded_2718(),
-                            //     metadata,
-                            // }
+                            let address = account_generator.get_address_by_id(*from_account_id);
+                            let signer = account_generator.get_signer_by_id(*from_account_id).clone();
+                            let tx_request = constructor
+                                .build_for_sender(*from_account_id, account_generator.clone(), *nonce as u64)
+                                .unwrap();
+                            let metadata = Arc::new(TxnMetadata {
+                                from_account: Arc::new(address),
+                                nonce: *nonce as u64,
+                                txn_id: Uuid::new_v4(),
+                                plan_id: plan_id.clone(),
+                            });
+                            let tx_envelope =
+                                TxnBuilder::build_and_sign_transaction(tx_request, &signer).unwrap();
+                            SignedTxnWithMetadata {
+                                bytes: tx_envelope.encoded_2718(),
+                                metadata,
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -180,7 +178,7 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error> {
         // 3. Parallelly build and sign transactions
         let plan_id = self.id.clone();
@@ -199,8 +197,7 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                         .into_par_iter()
                         .flat_map(|(to_account_id, _nonce)| {
                             // Build transaction request
-                            // let txs = constructor.build_for_receiver(*to_account_id, account_generator, chain_id).unwrap();
-                            let txs: Vec<TxEnvelope> = todo!();
+                            let txs = constructor.build_for_receiver(*to_account_id, account_generator.clone(), chain_id).unwrap();
                             txs.into_iter()
                                 .map(|tx_envelope| {
                                     let metadata = Arc::new(TxnMetadata {

@@ -8,7 +8,7 @@ use alloy::{
     sol_types::SolCall,
 };
 
-use crate::{config::IERC20, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId}};
+use crate::{config::IERC20, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId, AccountManager}};
 
 /// ERC20 approve constructor
 /// Approve tokens for multiple accounts to a specified spender (e.g. Uniswap Router)
@@ -33,7 +33,7 @@ impl FromTxnConstructor for ApproveTokenConstructor {
     fn build_for_sender(
         &self,
         from_account_id: AccountId,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         let approve_call = IERC20::approveCall {

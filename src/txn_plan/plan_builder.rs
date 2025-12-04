@@ -86,7 +86,7 @@ impl PlanBuilder {
         total_accounts: Arc<Vec<Arc<Address>>>,
         txn_builder: Arc<T>,
         remained_eth: U256,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: &mut AccountGenerator,
     ) -> Result<Arc<FaucetTreePlanBuilder<T>>, anyhow::Error> {
         let faucet_signer = PrivateKeySigner::from_str(faucet_private_key)?;
         let constructor = FaucetTreePlanBuilder::new(

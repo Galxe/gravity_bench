@@ -21,16 +21,13 @@ use tokio::{
 use tracing::{info, Level};
 
 use crate::{
-    actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
+    actors::{Monitor, RegisterTxnPlan, consumer::Consumer, producer::Producer},
     config::{BenchConfig, ContractConfig},
     eth::EthHttpCli,
     txn_plan::{
-        addr_pool::AddressPool,
-        constructor::FaucetTreePlanBuilder,
-        faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
-        PlanBuilder, TxnPlan,
+        PlanBuilder, TxnPlan, addr_pool::AddressPool, constructor::FaucetTreePlanBuilder, faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder}
     },
-    util::gen_account::AccountGenerator,
+    util::gen_account::{AccountGenerator, AccountManager},
 };
 
 #[derive(Parser, Debug)]
@@ -212,11 +209,11 @@ fn run_command(command: &str) -> Result<Output> {
 }
 
 async fn get_init_nonce_map(
-    accout_generator: Arc<RwLock<AccountGenerator>>,
+    accout_generator: AccountManager,
     faucet_private_key: &str,
     eth_client: Arc<EthHttpCli>,
 ) -> Arc<HashMap<Address, u64>> {
-    let mut init_nonce_map = accout_generator.read().await.init_nonce_map();
+    let mut init_nonce_map = accout_generator.init_nonce_map();
     let faucet_signer = PrivateKeySigner::from_str(faucet_private_key).unwrap();
     let faucet_address = faucet_signer.address();
     init_nonce_map.insert(
@@ -264,18 +261,14 @@ async fn start_bench() -> Result<()> {
         });
         contract_config
     };
-    let private_key_signer = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
-    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts, PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap());
+    let mut accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts, PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap());
     let account_ids = accout_generator
-        .write()
-        .await
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
     let account_addresses = Arc::new({
-        let gen = accout_generator.read().await;
         account_ids
             .iter()
-            .map(|&id| Arc::new(gen.get_address_by_id(id)))
+            .map(|&id| Arc::new(accout_generator.get_address_by_id(id)))
             .collect::<Vec<_>>()
     });
     // Create EthHttpCli instance
@@ -288,9 +281,7 @@ async fn start_bench() -> Result<()> {
         })
         .collect();
 
-    let address_pool: Arc<dyn AddressPool> = Arc::new(
-        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(account_ids.clone(), accout_generator.clone()),
-    );
+
 
     let chain_id = benchmark_config.nodes[0].chain_id;
 
@@ -306,32 +297,48 @@ async fn start_bench() -> Result<()> {
         U256::from(benchmark_config.num_tokens)
             * U256::from(21000)
             * U256::from(1000_000_000_000u64),
-        accout_generator.clone(),
+        &mut accout_generator,
     )
     .await
     .unwrap();
     if args.recover {
-        init_nonce(accout_generator.clone(), eth_clients[0].clone()).await;
+        init_nonce(&mut accout_generator, eth_clients[0].clone()).await;
     }
     let monitor = Monitor::new_with_clients(
         eth_clients.clone(),
         benchmark_config.performance.max_pool_size,
     )
     .start();
-    // let mut file = tokio::fs::File::create("accounts.txt").await.unwrap();
-    // for (sign, nonce) in accout_generator.read().await.accouts_nonce_iter() {
-    //     file.write(
-    //         format!(
-    //             "{}, {}, {}\n",
-    //             hex::encode(sign.to_bytes()),
-    //             sign.address().to_string(),
-    //             nonce.load(Ordering::Relaxed),
-    //         )
-    //         .as_bytes(),
-    //     )
-    //     .await
-    //     .unwrap();
-    // }
+
+    let tokens = contract_config.get_all_token();
+    let mut tokens_plan = Vec::new();
+    for token in &tokens {
+        start_nonce += benchmark_config.faucet.faucet_level as u64;
+        info!("distributing token: {}", token.address);
+        let token_address = Address::from_str(&token.address).unwrap();
+        let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
+        info!("balance of token: {}", faucet_token_balance);
+        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+            benchmark_config.faucet.faucet_level as usize,
+            faucet_token_balance,
+            &benchmark_config.faucet.private_key,
+            start_nonce,
+            account_addresses.clone(),
+            Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
+            U256::ZERO,
+            &mut accout_generator,
+        )
+        .await
+        .unwrap();
+        tokens_plan.push(token_faucet_builder);
+    }
+    
+    let account_manager = accout_generator.to_manager();
+
+    let address_pool: Arc<dyn AddressPool> = Arc::new(
+        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(account_ids.clone(), account_manager.clone()),
+    );
+
     // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients
         .iter()
@@ -347,7 +354,7 @@ async fn start_bench() -> Result<()> {
     )
     .start();
     let init_nonce_map = get_init_nonce_map(
-        accout_generator.clone(),
+        account_manager.clone(),
         benchmark_config.faucet.private_key.as_str(),
         eth_clients[0].clone(),
     )
@@ -357,7 +364,7 @@ async fn start_bench() -> Result<()> {
         address_pool.clone(),
         consumer,
         monitor,
-        accout_generator.clone(),
+        account_manager.clone(),
     )
     .await
     .unwrap()
@@ -372,29 +379,9 @@ async fn start_bench() -> Result<()> {
     )
     .await?;
 
-    let tokens = contract_config.get_all_token();
-
-    for token in &tokens {
-        start_nonce += benchmark_config.faucet.faucet_level as u64;
-        info!("distributing token: {}", token.address);
-        let token_address = Address::from_str(&token.address).unwrap();
-        let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
-        info!("balance of token: {}", faucet_token_balance);
-        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-            benchmark_config.faucet.faucet_level as usize,
-            faucet_token_balance,
-            &benchmark_config.faucet.private_key,
-            start_nonce,
-            account_addresses.clone(),
-            Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
-            U256::ZERO,
-            accout_generator.clone(),
-        )
-        .await
-        .unwrap();
-
+    for (token_plan, token) in tokens_plan.into_iter().zip(tokens.iter()) {
         execute_faucet_distribution(
-            token_faucet_builder,
+            token_plan,
             chain_id,
             &producer,
             &format!("Token {}", token.symbol),
@@ -432,9 +419,8 @@ async fn start_bench() -> Result<()> {
     Ok(())
 }
 
-async fn init_nonce(accout_generator: Arc<RwLock<AccountGenerator>>, eth_client: Arc<EthHttpCli>) {
+async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<EthHttpCli>) {
     tracing::info!("Initializing nonce...");
-    let accout_generator = accout_generator.read().await;
     let tasks = accout_generator
         .accouts_nonce_iter()
         .map(|(account, nonce)| {

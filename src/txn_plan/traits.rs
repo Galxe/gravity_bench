@@ -8,7 +8,7 @@ use alloy::signers::local::PrivateKeySigner;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::util::gen_account::{AccountGenerator, AccountId};
+use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
 
 #[derive(Debug, Clone, Message)]
 #[rtype(result = "anyhow::Result<()>")]
@@ -54,7 +54,7 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
     fn build_for_sender(
         &self,
         from_account_id: AccountId,
-        accout_generator: &AccountGenerator,
+        accout_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error>;
 
@@ -67,7 +67,7 @@ pub trait ToTxnConstructor: Send + Sync + 'static {
     fn build_for_receiver(
         &self,
         to_account_id: AccountId,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
         chain_id: u64,
     ) -> Result<Vec<TxEnvelope>, anyhow::Error>;
 
@@ -93,7 +93,7 @@ pub trait TxnPlan: Send + Sync {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: &AccountGenerator,
+        account_generator: AccountManager,
     ) -> Result<TxnIter, anyhow::Error>;
 
     /// Returns the unique identifier for this plan instance.
