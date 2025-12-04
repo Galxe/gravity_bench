@@ -429,7 +429,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         .accouts_nonce_iter()
         .map(|(account, nonce)| {
             let client = eth_client.clone();
-            let addr = account.address();
+            let addr = account.clone();
             async move {
                 let init_nonce = client.get_txn_count(addr).await;
                 match init_nonce {

@@ -18,7 +18,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 pub struct AccountId(u32);
 
 pub struct AccountGenerator {
-    accouts: Vec<PrivateKeySigner>,
+    accout_signers: Vec<PrivateKeySigner>,
+    accout_addresses: Vec<Address>,
     faucet_accout: PrivateKeySigner,
     faucet_accout_id: AccountId,
     init_nonces: Vec<Arc<AtomicU64>>,
@@ -29,7 +30,8 @@ pub type AccountManager = Arc<AccountGenerator>;
 impl AccountGenerator {
     pub fn with_capacity(_capacity: usize, faucet_accout: PrivateKeySigner) -> Self {
         Self {
-            accouts: Vec::new(),
+            accout_signers: Vec::new(),
+            accout_addresses: Vec::new(),
             faucet_accout,
             faucet_accout_id: AccountId(u32::MAX),
             init_nonces: Vec::new(),
@@ -44,7 +46,7 @@ impl AccountGenerator {
         if id == self.faucet_accout_id {
             &self.faucet_accout
         } else {
-            &self.accouts[id.0 as usize]
+            &self.accout_signers[id.0 as usize]
         }
     }
 
@@ -56,32 +58,33 @@ impl AccountGenerator {
         if id == self.faucet_accout_id {
             self.faucet_accout.address()
         } else {
-            self.accouts[id.0 as usize].address()
+            self.accout_signers[id.0 as usize].address()
         }
     }
 
     pub fn init_nonce_map(&self) -> HashMap<Address, u64> {
         let mut map = HashMap::new();
         for (account, nonce) in self.accouts_nonce_iter() {
-            map.insert(account.address(), nonce.load(Ordering::Relaxed));
+            map.insert(account.clone(), nonce.load(Ordering::Relaxed));
         }
         map
     }
 
-    pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&PrivateKeySigner, Arc<AtomicU64>)> {
-        self.accouts.iter().zip(self.init_nonces.iter().cloned())
+    pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&Address, Arc<AtomicU64>)> {
+        self.accout_addresses.iter().zip(self.init_nonces.iter().cloned())
     }
 
     pub fn account_ids_with_nonce(&self) -> impl Iterator<Item = (AccountId, Arc<AtomicU64>)> + '_ {
-        (0..self.accouts.len()).map(|i| (AccountId(i as u32), self.init_nonces[i].clone()))
+        (0..self.accout_signers.len()).map(|i| (AccountId(i as u32), self.init_nonces[i].clone()))
     }
 
     pub fn gen_account(&mut self, start_index: u64, size: u64) -> Result<Vec<AccountId>> {
-        let begin_index = self.accouts.len() as u64;
+        let begin_index = self.accout_signers.len() as u64;
         let end_index = start_index + size;
         if begin_index < end_index {
             let res = self.gen_deterministic_accounts(begin_index, end_index);
-            self.accouts.extend(res);
+            self.accout_addresses.extend(res.iter().map(|signer| signer.address()));
+            self.accout_signers.extend(res);
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
         }
