@@ -1,5 +1,3 @@
-use alloy::primitives::Address;
-
 use crate::util::gen_account::AccountId;
 
 pub mod managed_address_pool;
@@ -36,7 +34,7 @@ pub trait AddressPool: Send + Sync + 'static {
     /// Returns the total number of accounts in the pool.
     fn len(&self) -> usize;
 
-    /// Selects a receiver address based on the internal sampling strategy.
-    /// The excluded parameter is the address to exclude from selection.
-    fn select_receiver(&self, excluded: &Address) -> Address;
+    /// Selects a receiver account ID based on the internal sampling strategy.
+    /// The excluded parameter is the account ID to exclude from selection.
+    fn select_receiver(&self, excluded: AccountId) -> AccountId;
 }

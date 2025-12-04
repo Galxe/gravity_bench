@@ -239,16 +239,14 @@ impl AddressPool for WeightedAddressPool {
         self.inner.lock().all_account_ids.len()
     }
 
-    fn select_receiver(&self, excluded: &Address) -> Address {
+    fn select_receiver(&self, excluded: AccountId) -> AccountId {
         let inner = self.inner.lock();
-        let gen = tokio::runtime::Handle::current().block_on(self.account_generator.read());
         
-        let excluded_id = gen.get_id_by_address(excluded);
         loop {
             let idx = rand::random::<usize>() % inner.all_account_ids.len();
             let account_id = inner.all_account_ids[idx];
-            if Some(account_id) != excluded_id {
-                return gen.get_address_by_id(account_id);
+            if account_id != excluded {
+                return account_id;
             }
         }
     }

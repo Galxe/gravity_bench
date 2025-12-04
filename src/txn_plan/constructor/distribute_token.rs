@@ -6,7 +6,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 
-use crate::{eth::TxnBuilder, txn_plan::traits::FromTxnConstructor};
+use crate::{eth::TxnBuilder, txn_plan::traits::FromTxnConstructor, util::gen_account::{AccountGenerator, AccountId}};
 
 /// Token distribute constructor
 /// Distribute tokens to accounts using ETH
@@ -44,13 +44,13 @@ impl SwapEthToTokenConstructor {
 impl FromTxnConstructor for SwapEthToTokenConstructor {
     fn build_for_sender(
         &self,
-        _from_account: &Arc<Address>,
-        from_signer: &Arc<PrivateKeySigner>,
+        from_account_id: AccountId,
+        account_generator: &AccountGenerator,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
         // set transaction deadline (current time + 30 minutes)
         let deadline = U256::from(chrono::Utc::now().timestamp() + 1800);
-
+        let from_address = account_generator.get_address_by_id(from_account_id);
         // build swap path: WETH -> Token
         let path = vec![self.weth_address, self.token_address];
 
@@ -59,7 +59,7 @@ impl FromTxnConstructor for SwapEthToTokenConstructor {
             self.router_address,
             self.amount_out_min,
             path,
-            from_signer.address(),
+            from_address,
             deadline,
             self.eth_amount_per_account,
             nonce,

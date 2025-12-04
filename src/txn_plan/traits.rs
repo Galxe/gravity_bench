@@ -53,8 +53,8 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
     /// The `to` address is usually a field of the constructor itself (e.g., fixed spender or router address).
     fn build_for_sender(
         &self,
-        from_account: &Arc<Address>,
-        from_signer: &Arc<PrivateKeySigner>,
+        from_account_id: AccountId,
+        accout_generator: &AccountGenerator,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error>;
 
@@ -66,7 +66,8 @@ pub trait ToTxnConstructor: Send + Sync + 'static {
     /// Build transaction based on receiver information.
     fn build_for_receiver(
         &self,
-        to: &Arc<Address>,
+        to_account_id: AccountId,
+        account_generator: &AccountGenerator,
         chain_id: u64,
     ) -> Result<Vec<TxEnvelope>, anyhow::Error>;
 
