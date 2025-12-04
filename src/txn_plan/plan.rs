@@ -7,14 +7,15 @@ use crate::{
         },
         TxnIter,
     },
+    util::gen_account::{AccountGenerator, AccountId},
 };
 use alloy::{
-    consensus::transaction::SignerRecoverable, eips::Encodable2718, primitives::Address,
-    signers::local::PrivateKeySigner,
+    consensus::transaction::SignerRecoverable, eips::Encodable2718,
 };
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Concurrency control parameters
@@ -74,14 +75,30 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
 
     fn build_txns(
         &mut self,
-        ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+        ready_accounts: Vec<(AccountId, u32)>,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let constructor = self.constructor.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
+        
+        // Convert AccountId to (signer, address, nonce) tuples
+        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
+        let ready_accounts_with_signers: Vec<_> = ready_accounts
+            .into_iter()
+            .map(|(account_id, nonce)| {
+                (
+                    Arc::new(gen.get_signer_by_id(account_id).clone()),
+                    Arc::new(gen.get_address_by_id(account_id)),
+                    nonce,
+                )
+            })
+            .collect();
+        drop(gen);
+        
         // 4. Create async stream, process in batches
         let handle = tokio::task::spawn_blocking(move || {
-            ready_accounts
+            ready_accounts_with_signers
                 .chunks(1024)
                 .map(|chunk| {
                     chunk
@@ -172,20 +189,30 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
 
     fn build_txns(
         &mut self,
-        ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+        ready_accounts: Vec<(AccountId, u32)>,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<TxnIter, anyhow::Error> {
         // 3. Parallelly build and sign transactions
         let plan_id = self.id.clone();
         let constructor = self.constructor.clone();
         let chain_id = self.chain_id;
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
+        
+        // Convert AccountId to addresses
+        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
+        let addresses: Vec<_> = ready_accounts
+            .into_iter()
+            .map(|(account_id, _nonce)| Arc::new(gen.get_address_by_id(account_id)))
+            .collect();
+        drop(gen);
+        
         let handle = tokio::task::spawn_blocking(move || {
-            ready_accounts
+            addresses
                 .chunks(1024)
                 .map(|chunk| {
                     chunk
                         .into_par_iter()
-                        .flat_map(|(_signer, address, _nonce)| {
+                        .flat_map(|address| {
                             // Build transaction request
                             let txs = constructor.build_for_receiver(address, chain_id).unwrap();
                             txs.into_iter()

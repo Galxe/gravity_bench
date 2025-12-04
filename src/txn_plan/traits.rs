@@ -5,7 +5,10 @@ use alloy::consensus::TxEnvelope;
 use alloy::primitives::Address;
 use alloy::rpc::types::TransactionRequest;
 use alloy::signers::local::PrivateKeySigner;
+use tokio::sync::RwLock;
 use uuid::Uuid;
+
+use crate::util::gen_account::{AccountGenerator, AccountId};
 
 #[derive(Debug, Clone, Message)]
 #[rtype(result = "anyhow::Result<()>")]
@@ -84,12 +87,12 @@ pub struct TxnIter {
 pub trait TxnPlan: Send + Sync {
     /// Builds and signs a vector of transactions based on the plan's logic.
     ///
-    /// This method should read from the `AccountManager` to get available accounts and their nonces,
-    /// but it should NOT mutate the manager. All state changes will be handled by the Producer
-    /// after the transactions are built.
+    /// This method receives ready account IDs with their nonces and uses the AccountGenerator
+    /// to retrieve the actual signers and addresses needed for transaction construction.
     fn build_txns(
         &mut self,
-        ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+        ready_accounts: Vec<(AccountId, u32)>,
+        account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<TxnIter, anyhow::Error>;
 
     /// Returns the unique identifier for this plan instance.

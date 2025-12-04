@@ -165,24 +165,10 @@ impl Producer {
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
-        let ready_account_ids =
+        let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
         
-        // Convert AccountId to (signer, address, nonce) for build_txns
-        let gen = account_generator.read().await;
-        let ready_accounts: Vec<_> = ready_account_ids
-            .into_iter()
-            .map(|(account_id, nonce)| {
-                (
-                    Arc::new(gen.get_signer_by_id(account_id).clone()),
-                    Arc::new(gen.get_address_by_id(account_id)),
-                    nonce,
-                )
-            })
-            .collect();
-        drop(gen);
-        
-        let iterator = plan.as_mut().build_txns(ready_accounts)?;
+        let iterator = plan.as_mut().build_txns(ready_accounts, account_generator)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {

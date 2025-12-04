@@ -106,7 +106,8 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
 
     fn build_txns(
         &mut self,
-        _ready_accounts: Vec<(Arc<PrivateKeySigner>, Arc<Address>, u32)>,
+        _ready_accounts: Vec<(crate::util::gen_account::AccountId, u32)>,
+        _account_generator: Arc<tokio::sync::RwLock<crate::util::gen_account::AccountGenerator>>,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
