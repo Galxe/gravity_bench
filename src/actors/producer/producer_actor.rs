@@ -1,5 +1,4 @@
 use actix::prelude::*;
-use alloy::primitives::Address;
 use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -14,7 +13,7 @@ use crate::actors::monitor::{
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
-use crate::util::gen_account::AccountManager;
+use crate::util::gen_account::{AccountId, AccountManager};
 
 use super::messages::RegisterTxnPlan;
 
@@ -70,7 +69,7 @@ pub struct Producer {
     monitor_addr: Addr<Monitor>,
     consumer_addr: Addr<Consumer>,
 
-    nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+    nonce_cache: Arc<DashMap<AccountId, u32>>,
 
     account_generator: AccountManager,
 
@@ -92,9 +91,8 @@ impl Producer {
         let nonce_cache = Arc::new(DashMap::new());
         address_pool.clean_ready_accounts();
         for (account_id, nonce) in account_generator.account_ids_with_nonce() {
-            let address = Arc::new(account_generator.get_address_by_id(account_id));
             let nonce = nonce.load(Ordering::Relaxed) as u32;
-            nonce_cache.insert(address.clone(), nonce);
+            nonce_cache.insert(account_id, nonce);
             address_pool.unlock_correct_nonce(account_id, nonce);
         }
         Ok(Self {
@@ -157,7 +155,7 @@ impl Producer {
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
-        nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+        nonce_cache: Arc<DashMap<AccountId, u32>>,
     ) -> Result<(), anyhow::Error> {
         let plan_id = plan.id().clone();
 
@@ -187,7 +185,8 @@ impl Producer {
                 tracing::debug!("Producer is paused");
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            let next_nonce = match nonce_cache.get(signed_txn.metadata.from_account.as_ref()) {
+            let account_id = account_generator.get_id_by_address(&signed_txn.metadata.from_account).unwrap();
+            let next_nonce = match nonce_cache.get(&account_id) {
                 Some(nonce) => *nonce,
                 None => 0,
             };
@@ -416,8 +415,9 @@ impl Handler<UpdateSubmissionResult> for Producer {
             }
             SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                 self.stats.success_txns += 1;
+                let account_id = account_generator.get_id_by_address(&account).unwrap();
                 self.nonce_cache
-                    .insert(account.clone(), *expect_nonce as u32);
+                    .insert(account_id, *expect_nonce as u32);
             }
             SubmissionResult::ErrorWithRetry => {
                 self.stats.failed_txns += 1;
