@@ -116,15 +116,16 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             let num_intermediate_levels = total_levels - 1;
             for level in 0..num_intermediate_levels {
                 let num_accounts_at_level = degree.pow(level as u32 + 1);
-                let accounts = account_generator
+                let account_ids = account_generator
                     .write()
                     .await
                     .gen_account(start_index as u64, num_accounts_at_level as u64)
                     .unwrap();
+                let gen = account_generator.read().await;
                 account_levels.push(
-                    accounts
+                    account_ids
                         .iter()
-                        .map(|(_, signer)| signer.clone())
+                        .map(|&id| Arc::new(gen.get_signer_by_id(id).clone()))
                         .collect::<Vec<_>>(),
                 );
                 start_index += num_accounts_at_level as usize;

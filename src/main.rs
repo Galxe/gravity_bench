@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader},
+    io::{AsyncBufReadExt, BufReader as TokioBufReader},
     sync::RwLock,
 };
 use tracing::{info, Level};
@@ -266,17 +266,18 @@ async fn start_bench() -> Result<()> {
     };
 
     let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts);
-    let accounts = accout_generator
+    let account_ids = accout_generator
         .write()
         .await
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
         .unwrap();
-    let account_addresses = Arc::new(
-        accounts
+    let account_addresses = Arc::new({
+        let gen = accout_generator.read().await;
+        account_ids
             .iter()
-            .map(|(address, _)| address.clone())
-            .collect::<Vec<_>>(),
-    );
+            .map(|&id| Arc::new(gen.get_address_by_id(id)))
+            .collect::<Vec<_>>()
+    });
     // Create EthHttpCli instance
     let eth_clients: Vec<Arc<EthHttpCli>> = benchmark_config
         .nodes
@@ -288,7 +289,7 @@ async fn start_bench() -> Result<()> {
         .collect();
 
     let address_pool: Arc<dyn AddressPool> = Arc::new(
-        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(accounts.clone()),
+        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(account_ids.clone(), accout_generator.clone()),
     );
 
     let chain_id = benchmark_config.nodes[0].chain_id;

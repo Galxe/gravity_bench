@@ -32,6 +32,18 @@ impl AccountGenerator {
         }))
     }
 
+    pub fn get_signer_by_id(&self, id: AccountId) -> &PrivateKeySigner {
+        &self.accouts[id.0 as usize]
+    }
+
+    pub fn get_address_by_id(&self, id: AccountId) -> Address {
+        self.accouts[id.0 as usize].address()
+    }
+
+    pub fn get_id_by_address(&self, address: &Address) -> Option<AccountId> {
+        self.accout_to_id.get(address).copied()
+    }
+
     pub fn init_nonce_map(&self) -> HashMap<Address, u64> {
         let mut map = HashMap::new();
         for (account, nonce) in self.accouts_nonce_iter() {
@@ -44,11 +56,15 @@ impl AccountGenerator {
         self.accouts.iter().zip(self.init_nonces.iter().cloned())
     }
 
+    pub fn account_ids_with_nonce(&self) -> impl Iterator<Item = (AccountId, Arc<AtomicU64>)> + '_ {
+        (0..self.accouts.len()).map(|i| (AccountId(i as u32), self.init_nonces[i].clone()))
+    }
+
     pub fn gen_account(
         &mut self,
         start_index: u64,
         size: u64,
-    ) -> Result<Vec<(Arc<Address>, Arc<PrivateKeySigner>)>> {
+    ) -> Result<Vec<AccountId>> {
         let begin_index = self.accouts.len() as u64;
         let end_index = start_index + size;
         if begin_index < end_index {
@@ -63,8 +79,7 @@ impl AccountGenerator {
         }
         let mut res = Vec::new();
         for i in 0..size {
-            let signer = self.accouts[(start_index + i) as usize].clone();
-            res.push((Arc::new(signer.address()), Arc::new(signer)));
+            res.push(AccountId((start_index + i) as u32));
         }
         Ok(res)
     }

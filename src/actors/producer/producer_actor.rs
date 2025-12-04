@@ -72,6 +72,8 @@ pub struct Producer {
     consumer_addr: Addr<Consumer>,
 
     nonce_cache: Arc<DashMap<Arc<Address>, u32>>,
+    
+    account_generator: Arc<RwLock<AccountGenerator>>,
 
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
     plan_queue: VecDeque<Box<dyn TxnPlan>>,
@@ -89,14 +91,15 @@ impl Producer {
         account_generator: Arc<RwLock<AccountGenerator>>,
     ) -> Result<Self, anyhow::Error> {
         let nonce_cache = Arc::new(DashMap::new());
-        let account_generator = account_generator.read().await;
+        let gen = account_generator.read().await;
         address_pool.clean_ready_accounts();
-        for (account, nonce) in account_generator.accouts_nonce_iter() {
-            let address = Arc::new(account.address());
+        for (account_id, nonce) in gen.account_ids_with_nonce() {
+            let address = Arc::new(gen.get_address_by_id(account_id));
             let nonce = nonce.load(Ordering::Relaxed) as u32;
             nonce_cache.insert(address.clone(), nonce);
-            address_pool.unlock_correct_nonce(address.clone(), nonce);
+            address_pool.unlock_correct_nonce(account_id, nonce);
         }
+        drop(gen);
         Ok(Self {
             state: ProducerState::running(),
             stats: ProducerStats {
@@ -110,6 +113,7 @@ impl Producer {
             },
             address_pool,
             nonce_cache,
+            account_generator,
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
@@ -152,6 +156,7 @@ impl Producer {
         monitor_addr: Addr<Monitor>,
         consumer_addr: Addr<Consumer>,
         address_pool: Arc<dyn AddressPool>,
+        account_generator: Arc<RwLock<AccountGenerator>>,
         mut plan: Box<dyn TxnPlan>,
         sending_txns: Arc<AtomicU64>,
         state: ProducerState,
@@ -160,8 +165,23 @@ impl Producer {
         let plan_id = plan.id().clone();
 
         // Fetch accounts and build transactions
-        let ready_accounts =
+        let ready_account_ids =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
+        
+        // Convert AccountId to (signer, address, nonce) for build_txns
+        let gen = account_generator.read().await;
+        let ready_accounts: Vec<_> = ready_account_ids
+            .into_iter()
+            .map(|(account_id, nonce)| {
+                (
+                    Arc::new(gen.get_signer_by_id(account_id).clone()),
+                    Arc::new(gen.get_address_by_id(account_id)),
+                    nonce,
+                )
+            })
+            .collect();
+        drop(gen);
+        
         let iterator = plan.as_mut().build_txns(ready_accounts)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
@@ -269,6 +289,7 @@ impl Handler<ExeFrontPlan> for Producer {
         let plan = self.plan_queue.pop_front().unwrap();
         self.stats.remain_plans_num -= 1;
         let address_pool = self.address_pool.clone();
+        let account_generator = self.account_generator.clone();
         let monitor_addr = self.monitor_addr.clone();
         let consumer_addr = self.consumer_addr.clone();
         let self_addr = ctx.address();
@@ -292,6 +313,7 @@ impl Handler<ExeFrontPlan> for Producer {
                     monitor_addr,
                     consumer_addr,
                     address_pool,
+                    account_generator,
                     plan,
                     sending_txns,
                     state,
@@ -401,6 +423,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
+        let account_generator = self.account_generator.clone();
         let account = msg.metadata.from_account.clone();
         self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
         match msg.result.as_ref() {
@@ -419,22 +442,30 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let ready_accounts = self.stats.ready_accounts.clone();
         Box::pin(
             async move {
-                match msg.result.as_ref() {
-                    SubmissionResult::Success(_) => {
-                        address_pool.unlock_next_nonce(account);
+                let gen = account_generator.read().await;
+                let account_id = gen.get_id_by_address(&account);
+                drop(gen);
+                
+                if let Some(account_id) = account_id {
+                    match msg.result.as_ref() {
+                        SubmissionResult::Success(_) => {
+                            address_pool.unlock_next_nonce(account_id);
+                        }
+                        SubmissionResult::NonceTooLow { expect_nonce, .. } => {
+                            tracing::debug!(
+                                "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
+                                account,
+                                expect_nonce,
+                                msg.metadata.nonce
+                            );
+                            address_pool.unlock_correct_nonce(account_id, *expect_nonce as u32);
+                        }
+                        SubmissionResult::ErrorWithRetry => {
+                            address_pool.retry_current_nonce(account_id);
+                        }
                     }
-                    SubmissionResult::NonceTooLow { expect_nonce, .. } => {
-                        tracing::debug!(
-                            "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                            account,
-                            expect_nonce,
-                            msg.metadata.nonce
-                        );
-                        address_pool.unlock_correct_nonce(account, *expect_nonce as u32);
-                    }
-                    SubmissionResult::ErrorWithRetry => {
-                        address_pool.retry_current_nonce(account);
-                    }
+                } else {
+                    tracing::warn!("Account {:?} not found in account generator", account);
                 }
                 ready_accounts.store(address_pool.ready_len() as u64, Ordering::Relaxed);
             }
