@@ -452,8 +452,11 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[actix::main]
 async fn main() -> Result<()> {
-    #[cfg(feature = "dhat-heap")]
-    let _profiler = dhat::Profiler::new_heap();
+    #[cfg(feature = "dhat-heap")] 
+    let _profiler = {
+        println!("starting heap profiler...");
+        dhat::Profiler::new_heap();
+    };
     let res = async { start_bench().await };
     let ctrl_c = async {
         tokio::signal::ctrl_c()
