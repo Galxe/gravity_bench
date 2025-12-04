@@ -1,9 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+        Arc, atomic::{AtomicU64, Ordering}
+    }, u32,
 };
 
 use alloy::{
@@ -19,29 +18,45 @@ pub struct AccountId(u32);
 
 pub struct AccountGenerator {
     accouts: Vec<PrivateKeySigner>,
+    faucet_accout: PrivateKeySigner,
+    faucet_accout_id: AccountId,
     accout_to_id: HashMap<Address, AccountId>,
     init_nonces: Vec<Arc<AtomicU64>>,
 }
 
 impl AccountGenerator {
-    pub fn with_capacity(capacity: usize) -> Arc<RwLock<Self>> {
+    pub fn with_capacity(capacity: usize, faucet_accout: PrivateKeySigner) -> Arc<RwLock<Self>> {
         Arc::new(RwLock::new(Self {
             accouts: Vec::with_capacity(capacity),
+            faucet_accout,
+            faucet_accout_id: AccountId(u32::MAX),
             accout_to_id: HashMap::with_capacity(capacity),
             init_nonces: Vec::with_capacity(capacity),
         }))
     }
 
     pub fn get_signer_by_id(&self, id: AccountId) -> &PrivateKeySigner {
-        &self.accouts[id.0 as usize]
+        if id == self.faucet_accout_id {
+            &self.faucet_accout
+        } else {
+            &self.accouts[id.0 as usize]
+        }
     }
 
     pub fn get_address_by_id(&self, id: AccountId) -> Address {
-        self.accouts[id.0 as usize].address()
+        if id == self.faucet_accout_id {
+            self.faucet_accout.address()
+        } else {
+            self.accouts[id.0 as usize].address()
+        }
     }
 
     pub fn get_id_by_address(&self, address: &Address) -> Option<AccountId> {
-        self.accout_to_id.get(address).copied()
+        if address == &self.faucet_accout.address() {
+            Some(self.faucet_accout_id)
+        } else {
+            self.accout_to_id.get(address).copied()
+        }
     }
 
     pub fn init_nonce_map(&self) -> HashMap<Address, u64> {

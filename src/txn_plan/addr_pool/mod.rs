@@ -6,7 +6,8 @@ pub mod managed_address_pool;
 #[allow(unused)]
 pub mod weighted_address_pool;
 
-pub trait AddressPool: Send + Sync {
+#[async_trait::async_trait]
+pub trait AddressPool: Send + Sync + 'static {
     /// Fetches a batch of ready sender accounts based on the internal sampling strategy.
     /// This operation should internally lock the accounts to prevent concurrent use.
     /// Returns (AccountId, nonce) pairs.

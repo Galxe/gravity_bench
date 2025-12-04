@@ -113,7 +113,7 @@ impl AddressPool for RandomAddressPool {
 
     fn select_receiver(&self, excluded: &Address) -> Address {
         let inner = self.inner.lock();
-        let gen = tokio::runtime::Handle::current().block_on(self.account_generator.read());
+        let gen = self.account_generator.read();
         
         let excluded_id = gen.get_id_by_address(excluded);
         loop {

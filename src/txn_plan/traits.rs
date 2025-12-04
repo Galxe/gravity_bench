@@ -92,7 +92,7 @@ pub trait TxnPlan: Send + Sync {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: &AccountGenerator,
     ) -> Result<TxnIter, anyhow::Error>;
 
     /// Returns the unique identifier for this plan instance.

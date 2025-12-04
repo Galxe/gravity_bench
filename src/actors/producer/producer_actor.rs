@@ -167,8 +167,8 @@ impl Producer {
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-        
-        let iterator = plan.as_mut().build_txns(ready_accounts, account_generator)?;
+        let account_generator = account_generator.read().await;
+        let iterator = plan.as_mut().build_txns(ready_accounts, &account_generator)?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {

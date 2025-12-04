@@ -264,8 +264,8 @@ async fn start_bench() -> Result<()> {
         });
         contract_config
     };
-
-    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts);
+    let private_key_signer = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap();
+    let accout_generator = AccountGenerator::with_capacity(benchmark_config.accounts.num_accounts, PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap());
     let account_ids = accout_generator
         .write()
         .await

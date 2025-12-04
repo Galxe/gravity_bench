@@ -76,25 +76,23 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: &AccountGenerator,
     ) -> Result<TxnIter, anyhow::Error> {
         let plan_id = self.id.clone();
         let constructor = self.constructor.clone();
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
         
         // Convert AccountId to (signer, address, nonce) tuples
-        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
         let ready_accounts_with_signers: Vec<_> = ready_accounts
             .into_iter()
             .map(|(account_id, nonce)| {
                 (
-                    Arc::new(gen.get_signer_by_id(account_id).clone()),
-                    Arc::new(gen.get_address_by_id(account_id)),
+                    Arc::new(account_generator.get_signer_by_id(account_id).clone()),
+                    Arc::new(account_generator.get_address_by_id(account_id)),
                     nonce,
                 )
             })
             .collect();
-        drop(gen);
         
         // 4. Create async stream, process in batches
         let handle = tokio::task::spawn_blocking(move || {
@@ -190,7 +188,7 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
     fn build_txns(
         &mut self,
         ready_accounts: Vec<(AccountId, u32)>,
-        account_generator: Arc<RwLock<AccountGenerator>>,
+        account_generator: &AccountGenerator,
     ) -> Result<TxnIter, anyhow::Error> {
         // 3. Parallelly build and sign transactions
         let plan_id = self.id.clone();
@@ -199,12 +197,10 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
         let (tx, rx) = crossbeam::channel::bounded(self.concurrency_limit);
         
         // Convert AccountId to addresses
-        let gen = tokio::runtime::Handle::current().block_on(account_generator.read());
         let addresses: Vec<_> = ready_accounts
             .into_iter()
-            .map(|(account_id, _nonce)| Arc::new(gen.get_address_by_id(account_id)))
+            .map(|(account_id, _nonce)| Arc::new(account_generator.get_address_by_id(account_id)))
             .collect();
-        drop(gen);
         
         let handle = tokio::task::spawn_blocking(move || {
             addresses
