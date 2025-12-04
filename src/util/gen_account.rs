@@ -58,7 +58,7 @@ impl AccountGenerator {
         if id == self.faucet_accout_id {
             self.faucet_accout.address()
         } else {
-            self.accout_signers[id.0 as usize].address()
+            self.accout_addresses[id.0 as usize]
         }
     }
 
