@@ -13,6 +13,7 @@ struct Inner {
 
 pub struct RandomAddressPool {
     inner: Mutex<Inner>,
+    #[allow(unused)]
     account_generator: AccountManager,
 }
 
