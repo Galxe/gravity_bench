@@ -159,7 +159,18 @@ impl Handler<Tick> for Monitor {
                     .into_actor(self)
                     .map(move |results, act, _ctx| {
                         // Handle all parallel execution results
-                        act.txn_tracker.handle_receipt_result(results);
+                        let retries = act.txn_tracker.handle_receipt_result(results);
+                        
+                        // Send retry requests if any
+                        if !retries.is_empty() {
+                            if let Some(consumer_addr) = &act.consumer_addr {
+                                for retry_msg in retries {
+                                    consumer_addr.do_send(retry_msg);
+                                }
+                            } else {
+                                tracing::error!("Cannot retry transactions: Consumer address not registered");
+                            }
+                        }
                     }),
             );
         }

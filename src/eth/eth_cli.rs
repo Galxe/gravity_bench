@@ -153,6 +153,12 @@ impl EthHttpCli {
         self.chain_id
     }
 
+    pub async fn get_transaction_by_hash(&self, tx_hash: TxHash) -> Result<Option<TransactionReceipt>> {
+        let idx = rand::thread_rng().gen_range(0..self.inner.len());
+        let result = self.inner[idx].get_transaction_receipt(tx_hash).await;
+        result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
+    }
+
     pub async fn get_txn_count(&self, address: Address) -> Result<u64> {
         tokio::time::timeout(Duration::from_secs(10), async {
             let nonce = self.inner[0].get_transaction_count(address).await?;
