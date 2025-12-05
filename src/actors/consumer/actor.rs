@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     actors::{
         consumer::dispatcher::{Dispatcher, SimpleDispatcher},
-        monitor::{RegisterConsumer, SubmissionResult, UpdateSubmissionResult},
+        monitor::{RegisterConsumer, RetryDroppedTxn, SubmissionResult, UpdateSubmissionResult},
         Monitor,
     },
     eth::EthHttpCli,
@@ -231,6 +231,7 @@ impl Consumer {
                         result: Arc::new(SubmissionResult::Success(tx_hash)),
                         rpc_url,
                         send_time: Instant::now(),
+                        raw_tx: Some(Arc::new(signed_txn.bytes.clone())),
                     });
 
                     // Update statistics and return early
@@ -251,6 +252,7 @@ impl Consumer {
                             result: Arc::new(SubmissionResult::Success(tx_hash)),
                             rpc_url: url,
                             send_time: Instant::now(),
+                            raw_tx: Some(Arc::new(signed_txn.bytes.clone())),
                         });
 
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -287,6 +289,7 @@ impl Consumer {
                                     }),
                                     rpc_url: url,
                                     send_time: Instant::now(),
+                                    raw_tx: None,
                                 });
                             }
                         } else {
@@ -297,6 +300,7 @@ impl Consumer {
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),
                                 rpc_url: "unknown".to_string(),
                                 send_time: Instant::now(),
+                                raw_tx: None,
                             });
                         }
                         // After encountering Nonce error, should stop retrying and return regardless
@@ -329,6 +333,7 @@ impl Consumer {
             result: Arc::new(SubmissionResult::ErrorWithRetry), // Mark as needing upstream retry
             rpc_url: "unknown".to_string(),
             send_time: Instant::now(),
+            raw_tx: None,
         });
 
         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -415,6 +420,7 @@ impl Consumer {
                                         result: Arc::new(SubmissionResult::ErrorWithRetry),
                                         rpc_url: "unknown".to_string(),
                                         send_time: Instant::now(),
+                                        raw_tx: None,
                                         });
                                     break;
                                 }
@@ -524,6 +530,32 @@ impl Handler<SignedTxnWithMetadata> for Consumer {
                 }
                 Err(e) => Err(anyhow::anyhow!("Pool send error: {:?}", e)),
             }
+        })
+    }
+}
+
+impl Handler<RetryDroppedTxn> for Consumer {
+    type Result = ResponseFuture<()>;
+
+    fn handle(&mut self, msg: RetryDroppedTxn, _ctx: &mut Self::Context) -> Self::Result {
+        debug!("Retrying dropped transaction: {:?}", msg.original_hash);
+        let dispatcher = self.dispatcher.clone();
+        let monitor_addr = self.monitor_addr.clone();
+        // Note: We don't update stats here as it's a silent retry, or maybe we should?
+        // For now, keep it simple.
+        Box::pin(async move {
+             match dispatcher.send_tx(msg.raw_tx.as_ref().clone(), msg.metadata.txn_id).await {
+                 Ok((tx_hash, rpc_url)) => {
+                     info!("Retried txn sent. Hash: {}, URL: {}", tx_hash, rpc_url);
+                     // Notify monitor again? If we do, it might create a duplicate entry if not careful.
+                     // But we updated the hash in the previous successful send.
+                     // Actually, if we just resend, the hash should be the same (raw_tx is same).
+                     // So Monitor will just see it eventually.
+                 }
+                 Err((e, _)) => {
+                    warn!("Retry failed for txn {:?}: {}", msg.original_hash, e);
+                 }
+             }
         })
     }
 }

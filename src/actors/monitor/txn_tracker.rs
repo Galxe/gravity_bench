@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use alloy::consensus::Account;
 use alloy::primitives::TxHash;
+use alloy::rpc::types::TransactionReceipt;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
 use tracing::{debug, error, warn};
 
-use crate::actors::monitor::SubmissionResult;
+use crate::actors::monitor::{RetryDroppedTxn, SubmissionResult};
 use crate::eth::EthHttpCli;
 use crate::txn_plan::{PlanId, TxnMetadata};
 
@@ -17,6 +18,7 @@ use super::UpdateSubmissionResult;
 const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
+const DROP_DETECTION_THRESHOLD: Duration = Duration::from_secs(10); // Minimum time before checking for dropped txs
 
 /// Format large numbers with appropriate suffixes (K, M, B)
 fn format_large_number(num: u64) -> String {
@@ -78,6 +80,7 @@ pub(crate) struct PendingTxInfo {
     metadata: Arc<TxnMetadata>,
     rpc_url: String,
     submit_time: Instant,
+    raw_tx: Option<Arc<Vec<u8>>>, // Added raw_tx for retry
 }
 
 //--- Core implementation required for BTreeSet sorting ---//
@@ -112,6 +115,16 @@ pub enum PlanStatus {
     Completed,
     Failed { reason: String },
     InProgress,
+}
+
+/// Status of a checked transaction
+#[derive(Debug)]
+pub enum TransactionCheckStatus {
+    Confirmed(TransactionReceipt),
+    PendingInPool, // Found in pool (get_tx_by_hash returned it)
+    Dropped,       // Not in pool, not confirmed (get_tx_by_hash returned None)
+    RpcError(anyhow::Error),
+    NonceMismatch(Account), // Account nonce > tx nonce, likely confirmed but receipt missing (or reorged)
 }
 
 impl TxnTracker {
@@ -187,6 +200,7 @@ impl TxnTracker {
                     metadata: msg.metadata.clone(),
                     rpc_url: msg.rpc_url.clone(),
                     submit_time: Instant::now(),
+                    raw_tx: msg.raw_tx.clone(),
                 };
 
                 // Insert transaction into the global, time-sorted BTreeSet
@@ -203,6 +217,7 @@ impl TxnTracker {
                     metadata: msg.metadata.clone(),
                     rpc_url: msg.rpc_url.clone(),
                     submit_time: Instant::now(),
+                    raw_tx: msg.raw_tx.clone(),
                 };
                 self.pending_txns.insert(pending_info);
                 debug!(
@@ -267,8 +282,7 @@ impl TxnTracker {
         impl std::future::Future<
             Output = (
                 PendingTxInfo,
-                Result<Account, anyhow::Error>,
-                Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
+                TransactionCheckStatus,
             ),
         >,
     > {
@@ -306,16 +320,25 @@ impl TxnTracker {
                 let task_info = pending_info.clone();
 
                 let task = async move {
-                    let result = client.get_transaction_receipt(task_info.tx_hash).await;
-                    let account = client
-                        .get_account(*task_info.metadata.from_account.as_ref())
-                        .await;
-                    tracing::debug!(
-                        "checked tx_hash={:?} result={:?}",
-                        task_info.tx_hash,
-                        result
-                    );
-                    (task_info, account, result)
+                    // 1. Check Receipt
+                    match client.get_transaction_receipt(task_info.tx_hash).await {
+                        Ok(Some(receipt)) => (task_info, TransactionCheckStatus::Confirmed(receipt)),
+                        Err(e) => (task_info, TransactionCheckStatus::RpcError(e)),
+                        Ok(None) => {
+                            // 2. Receipt not found, check if transaction exists in pool/chain
+                            // Only perform this check if enough time has passed to assume propagation
+                            if task_info.submit_time.elapsed() > DROP_DETECTION_THRESHOLD {
+                                match client.get_transaction_by_hash(task_info.tx_hash).await {
+                                    Ok(Some(_)) => (task_info, TransactionCheckStatus::PendingInPool),
+                                    Ok(None) => (task_info, TransactionCheckStatus::Dropped),
+                                    Err(e) => (task_info, TransactionCheckStatus::RpcError(e)),
+                                }
+                            } else {
+                                // Too soon to check for drop, assume pending
+                                (task_info, TransactionCheckStatus::PendingInPool)
+                            }
+                        }
+                    }
                 };
                 tasks.push(task);
             } else {
@@ -330,47 +353,63 @@ impl TxnTracker {
         &mut self,
         results: Vec<(
             PendingTxInfo,
-            Result<Account, anyhow::Error>,
-            Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
+            TransactionCheckStatus,
         )>,
-    ) {
+    ) -> Vec<RetryDroppedTxn> {
         let mut successful_txns = Vec::new();
         let mut failed_txns = Vec::new(); // Including Pending, Timeout, Error
+        let mut retries = Vec::new();
 
         // 1. Categorize results
-        for (info, account, result) in results {
-            match result {
-                Ok(Some(receipt)) => {
+        for (info, status) in results {
+            match status {
+                TransactionCheckStatus::Confirmed(receipt) => {
                     // Transaction successfully confirmed
                     self.pending_txns.remove(&info);
                     successful_txns.push((info, receipt.status()));
                 }
-                Ok(None) => {
-                    // Transaction still pending
-                    if let Ok(account) = account {
-                        if account.nonce > info.metadata.nonce {
-                            successful_txns.push((info, true));
-                        }
-                    } else {
-                        failed_txns.push(info);
-                    }
+                TransactionCheckStatus::PendingInPool => {
+                     // Check for nonce update to detect "silent success" (optional but good)
+                     // For now, just treat as pending
+                     if info.submit_time.elapsed() > TXN_TIMEOUT {
+                         failed_txns.push(info); // Will be handled as timeout
+                     } 
+                     // Else do nothing, it stays in pending_txns
                 }
-                Err(e) => {
-                    // RPC query failed
-                    warn!(
-                        "Failed to get receipt for tx_hash={:?}: {}",
-                        info.tx_hash, e
-                    );
-                    failed_txns.push(info);
+                TransactionCheckStatus::Dropped => {
+                    // Transaction is missing from node!
+                     if info.submit_time.elapsed() > TXN_TIMEOUT {
+                         failed_txns.push(info);
+                     } else {
+                         // Trigger Retry
+                         if let Some(raw_tx) = &info.raw_tx {
+                             warn!("Transaction dropped (not found in pool), retrying: {:?}", info.tx_hash);
+                             retries.push(RetryDroppedTxn {
+                                 raw_tx: raw_tx.clone(),
+                                 metadata: info.metadata.clone(),
+                                 original_hash: info.tx_hash,
+                             });
+                             
+                             // IMPORTANT: Update submit_time to prevent immediate retry loop
+                             // We remove and re-insert with new time
+                             self.pending_txns.remove(&info);
+                             let mut new_info = info.clone();
+                             new_info.submit_time = Instant::now();
+                             self.pending_txns.insert(new_info);
+                         } else {
+                             error!("Transaction dropped but no raw_tx available for retry: {:?}", info.tx_hash);
+                             failed_txns.push(info);
+                         }
+                     }
+                }
+                TransactionCheckStatus::RpcError(e) => {
+                    warn!("RPC error checking status for {:?}: {}", info.tx_hash, e);
+                    // Keep pending
+                }
+                TransactionCheckStatus::NonceMismatch(_) => {
+                     // Not implementing nonce check logic here as requested, relying on hash checks
                 }
             }
-        }
-
-        if !failed_txns.is_empty() {
-            debug!(
-                "Failed to get receipt for {} transactions",
-                failed_txns.len()
-            );
         }
 
         let successful_txns_hash = successful_txns
@@ -451,15 +490,13 @@ impl TxnTracker {
                     self.resolved_txn_timestamps.push_back(Instant::now());
                     self.total_resolved_transactions += 1;
                 }
-            } else {
-                // Not timed out, put back in main queue for next round check
-                debug!(
-                    "Re-inserting pending transaction: tx_hash={:?}",
-                    info.tx_hash
-                );
-                self.pending_txns.insert(info);
-            }
+                // Remove from pending set if timed out
+                self.pending_txns.remove(&info);
+            } 
+            // Else: it was just re-inserted or kept in pending set above
         }
+
+        retries
     }
 
     pub fn log_stats(&mut self) {

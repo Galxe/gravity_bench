@@ -49,6 +49,8 @@ pub struct UpdateSubmissionResult {
     pub rpc_url: String,
     #[allow(unused)]
     pub send_time: Instant,
+    // Added: raw transaction bytes for retry
+    pub raw_tx: Option<Arc<Vec<u8>>>,
 }
 
 #[derive(Message)]
@@ -67,6 +69,14 @@ pub struct PlanCompleted {
 pub struct PlanFailed {
     pub plan_id: PlanId,
     pub reason: String,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RetryDroppedTxn {
+    pub raw_tx: Arc<Vec<u8>>,
+    pub metadata: Arc<TxnMetadata>,
+    pub original_hash: TxHash,
 }
 
 pub use monitor_actor::Monitor;
