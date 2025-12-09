@@ -6,6 +6,7 @@ use alloy::{
 use anyhow::Result;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::{
     collections::HashMap,
     process::{Command, Output},
@@ -424,25 +425,56 @@ async fn start_bench() -> Result<()> {
 
 async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<EthHttpCli>) {
     tracing::info!("Initializing nonce...");
-    let tasks = accout_generator
-        .accouts_nonce_iter()
-        .map(|(account, nonce)| {
-            let client = eth_client.clone();
-            let addr = account.clone();
-            async move {
-                let init_nonce = client.get_txn_count(addr).await;
-                match init_nonce {
-                    Ok(init_nonce) => nonce.store(init_nonce, Ordering::Relaxed),
-                    Err(e) => tracing::error!("Failed to get nonce for address: {}: {}", addr, e),
+    
+    // Collect all accounts first to get total count
+    let accounts: Vec<_> = accout_generator.accouts_nonce_iter().collect();
+    let total_accounts = accounts.len() as u64;
+    
+    // Create progress bar
+    let pb = ProgressBar::new(total_accounts);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({per_sec}, ETA: {eta})")
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+    
+    let pb = Arc::new(pb);
+    let start_time = Instant::now();
+    
+    let tasks = accounts.into_iter().map(|(account, nonce)| {
+        let client = eth_client.clone();
+        let addr = account.clone();
+        let pb = pb.clone();
+        async move {
+            let init_nonce = client.get_txn_count(addr).await;
+            match init_nonce {
+                Ok(init_nonce) => {
+                    nonce.store(init_nonce, Ordering::Relaxed);
+                    pb.inc(1);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to get nonce for address: {}: {}", addr, e);
+                    pb.inc(1);
                 }
             }
-        });
+        }
+    });
 
     stream::iter(tasks)
         .buffer_unordered(1024)
         .collect::<Vec<_>>()
         .await;
-    tracing::info!("Nonce initialized");
+    
+    pb.finish_with_message("Done");
+    let elapsed = start_time.elapsed();
+    let rate = total_accounts as f64 / elapsed.as_secs_f64();
+    tracing::info!(
+        "Nonce initialized: {} accounts in {:.2}s ({:.2} accounts/sec)",
+        total_accounts,
+        elapsed.as_secs_f64(),
+        rate
+    );
 }
 
 #[cfg(feature = "dhat-heap")]
