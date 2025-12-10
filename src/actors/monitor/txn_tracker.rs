@@ -49,6 +49,10 @@ pub struct TxnTracker {
     total_failed_submissions: u64,
     total_failed_executions: u64,
     last_completed_plan: Option<(PlanId, PlanTracker)>,
+    producer_ready_accounts: u64,
+    producer_sending_txns: u64,
+    mempool_pending: u64,
+    mempool_queued: u64,
 }
 
 /// Tracking status of a single transaction plan
@@ -133,8 +137,23 @@ impl TxnTracker {
             total_resolved_transactions: 0,
             total_failed_submissions: 0,
             total_failed_executions: 0,
+            total_failed_executions: 0,
             last_completed_plan: None,
+            producer_ready_accounts: 0,
+            producer_sending_txns: 0,
+            mempool_pending: 0,
+            mempool_queued: 0,
         }
+    }
+
+    pub fn update_producer_stats(&mut self, ready_accounts: u64, sending_txns: u64) {
+        self.producer_ready_accounts = ready_accounts;
+        self.producer_sending_txns = sending_txns;
+    }
+
+    pub fn update_mempool_stats(&mut self, pending: u64, queued: u64) {
+        self.mempool_pending = pending;
+        self.mempool_queued = queued;
     }
 
     pub fn handler_produce_txns(&mut self, plan_id: PlanId, count: usize) {
@@ -660,14 +679,31 @@ impl TxnTracker {
                 .add_attribute(Attribute::Bold)
                 .fg(Color::Blue),
             Cell::new(&format!(
-                "TPS:{:.1} | Latency(avg/min/max): {:.1}s/{:.1}s/{:.1}s",
+                "TPS:{:.1} | Lat: {:.1}s | Pool:{}/{}",
                 tps,
                 avg_latency.as_secs_f64(),
-                min_latency.as_secs_f64(),
-                max_latency.as_secs_f64()
+                format_large_number(self.mempool_pending),
+                format_large_number(self.mempool_queued)
             ))
             .add_attribute(Attribute::Bold)
             .fg(Color::Magenta),
+        ]);
+
+        table.add_row(vec![
+            Cell::new("SYSTEM")
+                .add_attribute(Attribute::Bold)
+                .fg(Color::Yellow),
+            Cell::new(""), // Progress placeholder
+            Cell::new(""), // Success% placeholder
+            Cell::new(""), // SendFail placeholder
+            Cell::new(""), // ExecFail placeholder
+            Cell::new(&format!(
+                "Ready Accounts: {} | Processing: {}",
+                format_large_number(self.producer_ready_accounts),
+                format_large_number(self.producer_sending_txns)
+            ))
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Yellow),
         ]);
 
         println!("{}", table);

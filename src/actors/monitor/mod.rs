@@ -58,6 +58,13 @@ pub struct Tick;
 // Monitor Messages
 #[derive(Message)]
 #[rtype(result = "()")]
+pub struct ReportProducerStats {
+    pub ready_accounts: u64,
+    pub sending_txns: u64,
+}
+
+#[derive(Message)]
+#[rtype(result = "()")]
 pub struct PlanCompleted {
     pub plan_id: PlanId,
 }
