@@ -159,6 +159,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                 let init_nonce = account_init_nonce
                                     .get(&sender_signer.address())
                                     .unwrap_or(&0);
+                                // Skip transaction if it was already executed (recovery mode).
+                                // In normal mode, init_nonce is 0 for all accounts, so nothing is skipped.
+                                // In recovery mode, init_nonce is the on-chain nonce, so we skip if init_nonce > nonce.
                                 if *init_nonce > nonce && init_nonce != &0 {
                                     continue;
                                 }

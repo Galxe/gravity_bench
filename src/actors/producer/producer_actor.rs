@@ -190,15 +190,6 @@ impl Producer {
                 Some(nonce) => *nonce,
                 None => 0,
             };
-            if next_nonce > signed_txn.metadata.nonce as u32 {
-                tracing::debug!(
-                    "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                    signed_txn.metadata.from_account,
-                    next_nonce,
-                    signed_txn.metadata.nonce
-                );
-                continue;
-            }
             if let Err(e) = consumer_addr.send(signed_txn).await {
                 // If sending to the consumer fails, we abort the entire plan.
                 tracing::error!(
@@ -410,11 +401,12 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
-        self.stats.sending_txns.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |val| Some(val.saturating_sub(1))
-        ).ok();
+        self.stats
+            .sending_txns
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                Some(val.saturating_sub(1))
+            })
+            .ok();
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;
