@@ -24,6 +24,9 @@ pub trait FaucetTxnBuilder: Send + Sync {
         nonce: u64,
         chain_id: u64,
     ) -> TransactionRequest;
+
+    /// Returns the name of the token type (e.g., "Eth", "Token")
+    fn token_name(&self) -> &str;
 }
 
 /// A `FaucetTxnBuilder` for native Ethereum (ETH) transfers.
@@ -45,6 +48,10 @@ impl FaucetTxnBuilder for EthFaucetTxnBuilder {
             .with_max_priority_fee_per_gas(10_000_000_000)
             .with_max_fee_per_gas(10_000_000_000)
             .with_gas_limit(21_000) // Standard gas for ETH transfer
+    }
+
+    fn token_name(&self) -> &str {
+        "Eth"
     }
 }
 
@@ -79,5 +86,9 @@ impl FaucetTxnBuilder for Erc20FaucetTxnBuilder {
             .with_max_priority_fee_per_gas(10_000_000_000)
             .with_max_fee_per_gas(10_000_000_000)
             .with_gas_limit(60_000) // A reasonable default for ERC20 transfers
+    }
+
+    fn token_name(&self) -> &str {
+        "Token"
     }
 }

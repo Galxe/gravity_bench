@@ -196,8 +196,13 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     ) -> Box<dyn TxnPlan> {
         let senders = self.get_senders_for_level(level);
         let is_final_level = level == self.total_levels.saturating_sub(1);
+        
+        // Generate descriptive plan name
+        let token_name = self.txn_builder.token_name();
+        let plan_name = format!("Level{}Faucet{}Plan", level, token_name);
 
         let plan = LevelFaucetPlan::new(
+            plan_name,
             chain_id,
             level,
             account_init_nonce,
