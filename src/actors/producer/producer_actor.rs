@@ -8,8 +8,8 @@ use std::time::Duration;
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
 use crate::actors::monitor::{
-    Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, SubmissionResult,
-    UpdateSubmissionResult,
+    Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, ReportProducerStats,
+    SubmissionResult, UpdateSubmissionResult,
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
@@ -190,15 +190,6 @@ impl Producer {
                 Some(nonce) => *nonce,
                 None => 0,
             };
-            if next_nonce > signed_txn.metadata.nonce as u32 {
-                tracing::debug!(
-                    "Nonce too low for account {:?}, expect nonce: {}, actual nonce: {}",
-                    signed_txn.metadata.from_account,
-                    next_nonce,
-                    signed_txn.metadata.nonce
-                );
-                continue;
-            }
             if let Err(e) = consumer_addr.send(signed_txn).await {
                 // If sending to the consumer fails, we abort the entire plan.
                 tracing::error!(
@@ -248,7 +239,11 @@ impl Actor for Producer {
         }
         .into_actor(self)
         .wait(ctx);
-        ctx.run_interval(Duration::from_secs(5), |act, _ctx| {
+        ctx.run_interval(Duration::from_secs(1), |act, _ctx| {
+            act.monitor_addr.do_send(ReportProducerStats {
+                ready_accounts: act.stats.ready_accounts.load(Ordering::Relaxed),
+                sending_txns: act.stats.sending_txns.load(Ordering::Relaxed),
+            });
             tracing::debug!("Producer stats: plans_num={}, sending_txns={}, ready_accounts={}, success_plans_num={}, failed_plans_num={}, success_txns={}, failed_txns={}", act.stats.remain_plans_num, act.stats.sending_txns.load(Ordering::Relaxed), act.stats.ready_accounts.load(Ordering::Relaxed), act.stats.success_plans_num, act.stats.failed_plans_num, act.stats.success_txns, act.stats.failed_txns);
         });
     }
@@ -406,7 +401,12 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
-        self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
+        self.stats
+            .sending_txns
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
+                Some(val.saturating_sub(1))
+            })
+            .ok();
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;

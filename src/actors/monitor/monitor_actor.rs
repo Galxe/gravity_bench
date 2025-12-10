@@ -14,8 +14,8 @@ use crate::txn_plan::PlanId;
 
 use super::txn_tracker::{PlanStatus, TxnTracker};
 use super::{
-    PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer, Tick,
-    UpdateSubmissionResult,
+    PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer,
+    ReportProducerStats, Tick, UpdateSubmissionResult,
 };
 
 #[derive(Message)]
@@ -93,10 +93,13 @@ impl Actor for Monitor {
                     .into_actor(act)
                     .map(|res, act, _ctx| {
                         if let Some(producer_addr) = &act.producer_addr {
-                            if let Err(e) =
-                                act.mempool_tracker.process_pool_status(res, producer_addr)
-                            {
-                                error!("Failed to process pool status: {}", e);
+                            match act.mempool_tracker.process_pool_status(res, producer_addr) {
+                                Ok((pending, queued)) => {
+                                    act.txn_tracker.update_mempool_stats(pending, queued);
+                                }
+                                Err(e) => {
+                                    error!("Failed to process pool status: {}", e);
+                                }
                             }
                         }
                     }),
@@ -210,5 +213,14 @@ impl Handler<PlanProduced> for Monitor {
     fn handle(&mut self, msg: PlanProduced, _ctx: &mut Self::Context) {
         self.txn_tracker
             .handle_plan_produced(msg.plan_id, msg.count);
+    }
+}
+
+impl Handler<ReportProducerStats> for Monitor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ReportProducerStats, _ctx: &mut Self::Context) {
+        self.txn_tracker
+            .update_producer_stats(msg.ready_accounts, msg.sending_txns);
     }
 }

@@ -27,6 +27,7 @@ const DEFAULT_CONCURRENCY_LIMIT: usize = 256;
 
 pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     id: PlanId,
+    name: String,
     account_init_nonce: Arc<HashMap<Address, u64>>,
     execution_mode: PlanExecutionMode,
     chain_id: u64,
@@ -47,6 +48,7 @@ pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
 impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        name: String,
         chain_id: u64,
         level: usize,
         account_init_nonce: Arc<HashMap<Address, u64>>,
@@ -67,6 +69,7 @@ impl<T: FaucetTxnBuilder> LevelFaucetPlan<T> {
         };
         Self {
             id,
+            name,
             account_init_nonce,
             execution_mode,
             chain_id,
@@ -101,7 +104,7 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
     }
 
     fn name(&self) -> &str {
-        "LevelFaucetPlan"
+        &self.name
     }
 
     fn build_txns(
@@ -156,6 +159,9 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
                                 let init_nonce = account_init_nonce
                                     .get(&sender_signer.address())
                                     .unwrap_or(&0);
+                                // Skip transaction if it was already executed (recovery mode).
+                                // In normal mode, init_nonce is 0 for all accounts, so nothing is skipped.
+                                // In recovery mode, init_nonce is the on-chain nonce, so we skip if init_nonce > nonce.
                                 if *init_nonce > nonce && init_nonce != &0 {
                                     continue;
                                 }

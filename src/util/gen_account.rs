@@ -166,3 +166,109 @@ impl AccountGenerator {
         accounts
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::primitives::keccak256;
+
+    #[test]
+    fn test_compute_account_address() {
+        // Test computing address for specific account IDs
+        let test_ids = vec![0, 1, 100, 1000, 10000, 100000, 1000000];
+
+        println!("\n=== Account ID to Address Mapping ===");
+        for id in test_ids {
+            let private_key_bytes = keccak256((id as u64).to_le_bytes());
+            let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice()).unwrap();
+            let address = signer.address();
+
+            println!("ID {}: Address = {:?}", id, address);
+            println!("       Private Key = 0x{}", hex::encode(private_key_bytes));
+        }
+    }
+
+    #[test]
+    fn test_find_account_by_address() {
+        // Find account ID for a specific address
+        let target_address = "0x3ece3a612e4e8849a3eaf093c61683b1370f3418";
+
+        println!("\n=== Searching for address {} ===", target_address);
+
+        // Search final recipients in batches
+        println!("Searching final recipients (0-999999) in batches...");
+        let batch_size = 10000;
+        for batch_start in (0..1000000).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(1000000);
+
+            for id in batch_start..batch_end {
+                let private_key_bytes = keccak256((id as u64).to_le_bytes());
+                let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice()).unwrap();
+                let address = format!("{:?}", signer.address()).to_lowercase();
+
+                if address == target_address.to_lowercase() {
+                    println!("FOUND! Account ID = {}", id);
+                    println!("This is a final recipient account");
+                    println!("Private Key = 0x{}", hex::encode(private_key_bytes));
+
+                    // Calculate parent node
+                    let degree = 10;
+                    let parent_index_in_level5 = id / degree;
+                    let parent_id = 1011110 + parent_index_in_level5;
+
+                    println!("\nParent node calculation:");
+                    println!("  Parent is in Level 5");
+                    println!("  Parent index in Level 5: {}", parent_index_in_level5);
+                    println!("  Parent account ID: {}", parent_id);
+
+                    let parent_pk = keccak256((parent_id as u64).to_le_bytes());
+                    let parent_signer = PrivateKeySigner::from_slice(parent_pk.as_slice()).unwrap();
+                    println!("  Parent address: {:?}", parent_signer.address());
+
+                    return;
+                }
+            }
+
+            if batch_start % 100000 == 0 {
+                println!("  Checked up to ID {}...", batch_end);
+            }
+        }
+
+        println!("Address not found in final recipients");
+    }
+
+    #[test]
+    fn test_faucet_tree_structure() {
+        // Print the faucet tree structure with actual addresses
+        println!("\n=== Faucet Tree Structure ===");
+
+        let degree = 10;
+        let total_accounts = 1000000;
+
+        // Faucet account (using the one from bench_config.toml)
+        let faucet_pk = "5c173b12be434289682782ac6f7e7bf73a6fa5a20d507e318a4bdb039b1a5f6e";
+        let faucet_bytes = hex::decode(faucet_pk).unwrap();
+        let faucet_signer = PrivateKeySigner::from_slice(&faucet_bytes).unwrap();
+        println!("Faucet: {:?}", faucet_signer.address());
+
+        // Level 0 (first 10 intermediate accounts)
+        println!("\nLevel 0 (indices 1000000-1000009):");
+        for i in 0..3 {
+            let id = 1000000 + i;
+            let pk = keccak256((id as u64).to_le_bytes());
+            let signer = PrivateKeySigner::from_slice(pk.as_slice()).unwrap();
+            println!("  ID {}: {:?}", id, signer.address());
+        }
+        println!("  ...");
+
+        // Level 1 (sample)
+        println!("\nLevel 1 (indices 1000010-1000109, showing first 3):");
+        for i in 0..3 {
+            let id = 1000010 + i;
+            let pk = keccak256((id as u64).to_le_bytes());
+            let signer = PrivateKeySigner::from_slice(pk.as_slice()).unwrap();
+            println!("  ID {}: {:?}", id, signer.address());
+        }
+        println!("  ...");
+    }
+}

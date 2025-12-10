@@ -31,7 +31,7 @@ impl MempoolTracker {
         &self,
         status: Vec<anyhow::Result<MempoolStatus>>,
         producer_addr: &Addr<Producer>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(u64, u64), anyhow::Error> {
         let _ = producer_addr;
         let mut total_pending = 0;
         let mut total_queued = 0;
@@ -44,6 +44,6 @@ impl MempoolTracker {
         } else if total_pending + total_queued < self.max_pool_size / 2 {
             producer_addr.do_send(ResumeProducer);
         }
-        Ok(())
+        Ok((total_pending as u64, total_queued as u64))
     }
 }
