@@ -410,7 +410,11 @@ impl Handler<UpdateSubmissionResult> for Producer {
 
     fn handle(&mut self, msg: UpdateSubmissionResult, _ctx: &mut Self::Context) -> Self::Result {
         let address_pool = self.address_pool.clone();
-        self.stats.sending_txns.fetch_sub(1, Ordering::Relaxed);
+        self.stats.sending_txns.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |val| Some(val.saturating_sub(1))
+        ).ok();
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
                 self.stats.success_txns += 1;

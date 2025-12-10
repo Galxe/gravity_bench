@@ -137,7 +137,6 @@ impl TxnTracker {
             total_resolved_transactions: 0,
             total_failed_submissions: 0,
             total_failed_executions: 0,
-            total_failed_executions: 0,
             last_completed_plan: None,
             producer_ready_accounts: 0,
             producer_sending_txns: 0,
@@ -497,7 +496,7 @@ impl TxnTracker {
         let tps = self.resolved_txn_timestamps.len() as f64 / TPS_WINDOW.as_secs_f64();
 
         // Calculate latency stats
-        let (avg_latency, min_latency, max_latency) = if !self.latencies.is_empty() {
+        let (avg_latency, _min_latency, _max_latency) = if !self.latencies.is_empty() {
             let sum: Duration = self.latencies.iter().sum();
             let avg = sum / self.latencies.len() as u32;
             let min = *self.latencies.iter().min().unwrap();

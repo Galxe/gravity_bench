@@ -242,6 +242,23 @@ impl Consumer {
                 Err((e, url)) => {
                     let error_string = e.to_string().to_lowercase();
 
+                    // --- Handle "already known" error ---
+                    // This means the transaction is already in the node's mempool
+                    if error_string.contains("already known") || error_string.contains("already imported") {
+                        let tx_hash = keccak256(&signed_txn.bytes);
+                        debug!("Transaction already known by node: {:?}, treating as success", tx_hash);
+                        monitor_addr.do_send(UpdateSubmissionResult {
+                            metadata,
+                            result: Arc::new(SubmissionResult::Success(tx_hash)),
+                            rpc_url: url,
+                            send_time: Instant::now(),
+                        });
+
+                        transactions_sending.fetch_sub(1, Ordering::Relaxed);
+                        transactions_sent.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+
                     // --- Requirement 3: If it's an "underpriced" error ---
                     // This error means the transaction was accepted by the node but gas is insufficient. We can calculate the hash and treat it as successfully submitted.
                     if error_string.contains("underpriced") {

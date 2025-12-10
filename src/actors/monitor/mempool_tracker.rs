@@ -44,6 +44,6 @@ impl MempoolTracker {
         } else if total_pending + total_queued < self.max_pool_size / 2 {
             producer_addr.do_send(ResumeProducer);
         }
-        Ok((total_pending, total_queued))
+        Ok((total_pending as u64, total_queued as u64))
     }
 }
