@@ -113,7 +113,7 @@ impl Producer {
             consumer_addr,
             plan_queue: VecDeque::new(),
             pending_plans: HashMap::new(),
-            max_queue_size: 100000,
+            max_queue_size: 10,
         })
     }
 

@@ -18,6 +18,13 @@ const SAMPLING_SIZE: usize = 10; // Define sampling size
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
 
+// Backpressure configuration
+const MAX_PENDING_TXNS: usize = 100_000;
+const BACKPRESSURE_RESUME_THRESHOLD: usize = 80_000; // 80% of max
+
+// Retry configuration
+const RETRY_TIMEOUT: Duration = Duration::from_secs(60); // Retry if stuck for 60s
+
 /// Format large numbers with appropriate suffixes (K, M, B)
 fn format_large_number(num: u64) -> String {
     if num >= 1_000_000_000 {
@@ -53,6 +60,8 @@ pub struct TxnTracker {
     producer_sending_txns: u64,
     mempool_pending: u64,
     mempool_queued: u64,
+    /// Track if producer was paused due to pending txn limit
+    producer_paused_by_pending: bool,
 }
 
 /// Tracking status of a single transaction plan
@@ -82,6 +91,8 @@ pub(crate) struct PendingTxInfo {
     metadata: Arc<TxnMetadata>,
     rpc_url: String,
     submit_time: Instant,
+    /// Signed transaction bytes for retry support
+    signed_bytes: Arc<Vec<u8>>,
 }
 
 //--- Core implementation required for BTreeSet sorting ---//
@@ -118,6 +129,21 @@ pub enum PlanStatus {
     InProgress,
 }
 
+/// Backpressure action to control producer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackpressureAction {
+    Pause,
+    Resume,
+    None,
+}
+
+/// Transaction ready for retry
+#[derive(Debug, Clone)]
+pub struct RetryTxnInfo {
+    pub signed_bytes: Arc<Vec<u8>>,
+    pub metadata: Arc<TxnMetadata>,
+}
+
 impl TxnTracker {
     /// Create new transaction tracker
     pub fn new(clients: Vec<Arc<EthHttpCli>>) -> Self {
@@ -142,6 +168,7 @@ impl TxnTracker {
             producer_sending_txns: 0,
             mempool_pending: 0,
             mempool_queued: 0,
+            producer_paused_by_pending: false,
         }
     }
 
@@ -153,6 +180,29 @@ impl TxnTracker {
     pub fn update_mempool_stats(&mut self, pending: u64, queued: u64) {
         self.mempool_pending = pending;
         self.mempool_queued = queued;
+    }
+
+    /// Check if backpressure should be applied based on pending txn count
+    pub fn check_pending_backpressure(&mut self) -> BackpressureAction {
+        let current = self.pending_txns.len();
+        if current >= MAX_PENDING_TXNS && !self.producer_paused_by_pending {
+            self.producer_paused_by_pending = true;
+            warn!(
+                "Pending txns {} >= {}, pausing producer",
+                current, MAX_PENDING_TXNS
+            );
+            BackpressureAction::Pause
+        } else if current < BACKPRESSURE_RESUME_THRESHOLD && self.producer_paused_by_pending {
+            self.producer_paused_by_pending = false;
+            tracing::info!(
+                "Pending txns {} < {}, resuming producer",
+                current,
+                BACKPRESSURE_RESUME_THRESHOLD
+            );
+            BackpressureAction::Resume
+        } else {
+            BackpressureAction::None
+        }
     }
 
     pub fn handler_produce_txns(&mut self, plan_id: PlanId, count: usize) {
@@ -205,6 +255,7 @@ impl TxnTracker {
                     metadata: msg.metadata.clone(),
                     rpc_url: msg.rpc_url.clone(),
                     submit_time: Instant::now(),
+                    signed_bytes: msg.signed_bytes.clone(),
                 };
 
                 // Insert transaction into the global, time-sorted BTreeSet
@@ -221,6 +272,7 @@ impl TxnTracker {
                     metadata: msg.metadata.clone(),
                     rpc_url: msg.rpc_url.clone(),
                     submit_time: Instant::now(),
+                    signed_bytes: msg.signed_bytes.clone(),
                 };
                 self.pending_txns.insert(pending_info);
                 debug!(
@@ -351,9 +403,10 @@ impl TxnTracker {
             Result<Account, anyhow::Error>,
             Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
         )>,
-    ) {
+    ) -> Vec<RetryTxnInfo> {
         let mut successful_txns = Vec::new();
         let mut failed_txns = Vec::new(); // Including Pending, Timeout, Error
+        let mut retry_queue = Vec::new();
 
         // 1. Categorize results
         for (info, account, result) in results {
@@ -455,13 +508,16 @@ impl TxnTracker {
         }
 
         // 4. Process failed or still pending transactions from this sampling
+        // Retry logic: if stuck for RETRY_TIMEOUT (60s), queue for retry
+        // Final failure only at TXN_TIMEOUT (10 min)
         for info in failed_txns {
             if info.submit_time.elapsed() > TXN_TIMEOUT {
-                // Transaction timed out, completely failed
+                // Transaction has completely timed out (10 min), mark as failed
                 error!(
-                    "Transaction timed out: plan_id={}, tx_hash={:?}",
+                    "Transaction completely timed out: plan_id={}, tx_hash={:?}",
                     info.metadata.plan_id, info.tx_hash
                 );
+                self.pending_txns.remove(&info);
                 if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                     plan_tracker.resolved_transactions += 1;
                     plan_tracker.failed_executions += 1;
@@ -469,6 +525,18 @@ impl TxnTracker {
                     self.resolved_txn_timestamps.push_back(Instant::now());
                     self.total_resolved_transactions += 1;
                 }
+            } else if info.submit_time.elapsed() > RETRY_TIMEOUT {
+                // Transaction stuck for 60s, queue for retry
+                warn!(
+                    "Transaction {} stuck for {}s, queuing for retry",
+                    info.tx_hash,
+                    info.submit_time.elapsed().as_secs()
+                );
+                self.pending_txns.remove(&info);
+                retry_queue.push(RetryTxnInfo {
+                    signed_bytes: info.signed_bytes.clone(),
+                    metadata: info.metadata.clone(),
+                });
             } else {
                 // Not timed out, put back in main queue for next round check
                 debug!(
@@ -478,6 +546,8 @@ impl TxnTracker {
                 self.pending_txns.insert(info);
             }
         }
+
+        retry_queue
     }
 
     pub fn log_stats(&mut self) {
