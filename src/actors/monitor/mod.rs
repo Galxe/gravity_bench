@@ -49,6 +49,8 @@ pub struct UpdateSubmissionResult {
     pub rpc_url: String,
     #[allow(unused)]
     pub send_time: Instant,
+    /// Signed transaction bytes for retry support
+    pub signed_bytes: Arc<Vec<u8>>,
 }
 
 #[derive(Message)]
@@ -74,6 +76,14 @@ pub struct PlanCompleted {
 pub struct PlanFailed {
     pub plan_id: PlanId,
     pub reason: String,
+}
+
+/// Message to retry a timed-out transaction
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct RetryTxn {
+    pub signed_bytes: Arc<Vec<u8>>,
+    pub metadata: Arc<TxnMetadata>,
 }
 
 pub use monitor_actor::Monitor;

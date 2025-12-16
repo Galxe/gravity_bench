@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     actors::{
         consumer::dispatcher::{Dispatcher, SimpleDispatcher},
-        monitor::{RegisterConsumer, SubmissionResult, UpdateSubmissionResult},
+        monitor::{RegisterConsumer, RetryTxn, SubmissionResult, UpdateSubmissionResult},
         Monitor,
     },
     eth::EthHttpCli,
@@ -231,6 +231,7 @@ impl Consumer {
                         result: Arc::new(SubmissionResult::Success(tx_hash)),
                         rpc_url,
                         send_time: Instant::now(),
+                        signed_bytes: Arc::new(signed_txn.bytes.clone()),
                     });
 
                     // Update statistics and return early
@@ -244,14 +245,20 @@ impl Consumer {
 
                     // --- Handle "already known" error ---
                     // This means the transaction is already in the node's mempool
-                    if error_string.contains("already known") || error_string.contains("already imported") {
+                    if error_string.contains("already known")
+                        || error_string.contains("already imported")
+                    {
                         let tx_hash = keccak256(&signed_txn.bytes);
-                        debug!("Transaction already known by node: {:?}, treating as success", tx_hash);
+                        debug!(
+                            "Transaction already known by node: {:?}, treating as success",
+                            tx_hash
+                        );
                         monitor_addr.do_send(UpdateSubmissionResult {
                             metadata,
                             result: Arc::new(SubmissionResult::Success(tx_hash)),
                             rpc_url: url,
                             send_time: Instant::now(),
+                            signed_bytes: Arc::new(signed_txn.bytes.clone()),
                         });
 
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -268,6 +275,7 @@ impl Consumer {
                             result: Arc::new(SubmissionResult::Success(tx_hash)),
                             rpc_url: url,
                             send_time: Instant::now(),
+                            signed_bytes: Arc::new(signed_txn.bytes.clone()),
                         });
 
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -304,6 +312,7 @@ impl Consumer {
                                     }),
                                     rpc_url: url,
                                     send_time: Instant::now(),
+                                    signed_bytes: Arc::new(signed_txn.bytes.clone()),
                                 });
                             }
                         } else {
@@ -314,6 +323,7 @@ impl Consumer {
                                 result: Arc::new(SubmissionResult::ErrorWithRetry),
                                 rpc_url: "unknown".to_string(),
                                 send_time: Instant::now(),
+                                signed_bytes: Arc::new(signed_txn.bytes.clone()),
                             });
                         }
                         // After encountering Nonce error, should stop retrying and return regardless
@@ -346,6 +356,7 @@ impl Consumer {
             result: Arc::new(SubmissionResult::ErrorWithRetry), // Mark as needing upstream retry
             rpc_url: "unknown".to_string(),
             send_time: Instant::now(),
+            signed_bytes: Arc::new(signed_txn.bytes.clone()),
         });
 
         transactions_sending.fetch_sub(1, Ordering::Relaxed);
@@ -428,10 +439,11 @@ impl Consumer {
                                 Err(_) => {
                                     error!("Semaphore has been closed, stopping consumer loop.");
                                     monitor_addr.do_send(UpdateSubmissionResult {
-                                        metadata: signed_txn.metadata,
+                                        metadata: signed_txn.metadata.clone(),
                                         result: Arc::new(SubmissionResult::ErrorWithRetry),
                                         rpc_url: "unknown".to_string(),
                                         send_time: Instant::now(),
+                                        signed_bytes: Arc::new(signed_txn.bytes.clone()),
                                         });
                                     break;
                                 }
@@ -542,5 +554,36 @@ impl Handler<SignedTxnWithMetadata> for Consumer {
                 Err(e) => Err(anyhow::anyhow!("Pool send error: {:?}", e)),
             }
         })
+    }
+}
+
+/// Handler for retry requests from Monitor for timed-out transactions
+impl Handler<RetryTxn> for Consumer {
+    type Result = ();
+
+    fn handle(&mut self, msg: RetryTxn, _ctx: &mut Self::Context) -> Self::Result {
+        debug!("Retrying transaction: {:?}", msg.metadata.txn_id);
+
+        // Convert to SignedTxnWithMetadata and send through normal channel
+        let signed_txn = SignedTxnWithMetadata {
+            bytes: (*msg.signed_bytes).clone(),
+            metadata: msg.metadata,
+        };
+
+        let sender = self.pool_sender.clone();
+        let pool_size = self.stats.pool_size.clone();
+
+        // Spawn to avoid blocking the actor
+        actix::spawn(async move {
+            match sender.send(signed_txn).await {
+                Ok(_) => {
+                    pool_size.fetch_add(1, Ordering::Relaxed);
+                    debug!("Retry transaction added to pool");
+                }
+                Err(e) => {
+                    error!("Failed to add retry transaction to pool: {:?}", e);
+                }
+            }
+        });
     }
 }

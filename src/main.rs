@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
-use tracing::{info, Level};
+use tracing::{error, info, Level};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
@@ -105,8 +105,11 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
         let faucet_level_plan =
             faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
 
-        let rx = run_plan(faucet_level_plan, producer).await?;
-        rx.await??;
+        let rx = run_plan(faucet_level_plan, producer).await;
+        match rx {
+            Ok(rx) => rx.await??,
+            Err(err) => tracing::error!("Failed to run plan: {}", err),
+        }
         if wait_duration_secs > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(wait_duration_secs)).await;
         }
@@ -162,7 +165,20 @@ async fn test_uniswap(
             contract_config.get_router_address().unwrap(),
             tps,
         );
-        let _rx = run_plan(plan, producer).await?;
+        let rx = match run_plan(plan, producer).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                info!("Failed to submit plan: {}. Retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        // Spawn waiting in background to allow parallel plan execution
+        tokio::spawn(async move {
+            if let Err(e) = rx.await {
+                error!("Plan execution failed: {:?}", e);
+            }
+        });
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
@@ -193,7 +209,20 @@ async fn test_erc20_transfer(
             address_pool.clone(),
             tps,
         );
-        let _rx = run_plan(erc20_transfer, producer).await?;
+        let rx = match run_plan(erc20_transfer, producer).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                info!("Failed to submit plan: {}. Retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        // Spawn waiting in background to allow parallel plan execution
+        tokio::spawn(async move {
+            if let Err(e) = rx.await {
+                error!("Plan execution failed: {:?}", e);
+            }
+        });
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
@@ -447,14 +476,27 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         let addr = account.clone();
         let pb = pb.clone();
         async move {
-            let init_nonce = client.get_txn_count(addr).await;
-            match init_nonce {
-                Ok(init_nonce) => {
-                    nonce.store(init_nonce, Ordering::Relaxed);
+            let mut init_nonce = None;
+            {
+                for _ in 0..5 {
+                    let res = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        client.get_txn_count(addr),
+                    )
+                    .await;
+                    if res.is_ok() {
+                        init_nonce = res.ok();
+                        break;
+                    }
+                }
+            }
+            match &init_nonce {
+                Some(Ok(init_nonce)) => {
+                    nonce.store(*init_nonce, Ordering::Relaxed);
                     pb.inc(1);
                 }
-                Err(e) => {
-                    tracing::error!("Failed to get nonce for address: {}: {}", addr, e);
+                _ => {
+                    tracing::error!("Failed to get nonce for address: {:?}", init_nonce);
                     panic!("Failed to get nonce for address: {}", addr);
                 }
             }

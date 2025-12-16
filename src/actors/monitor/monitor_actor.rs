@@ -12,11 +12,12 @@ use crate::actors::producer::Producer;
 use crate::eth::EthHttpCli;
 use crate::txn_plan::PlanId;
 
-use super::txn_tracker::{PlanStatus, TxnTracker};
+use super::txn_tracker::{BackpressureAction, PlanStatus, TxnTracker};
 use super::{
     PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer,
-    ReportProducerStats, Tick, UpdateSubmissionResult,
+    ReportProducerStats, RetryTxn, Tick, UpdateSubmissionResult,
 };
+use crate::actors::{PauseProducer, ResumeProducer};
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -154,15 +155,41 @@ impl Handler<Tick> for Monitor {
     type Result = ();
 
     fn handle(&mut self, _msg: Tick, ctx: &mut Self::Context) {
-        // Perform sampling check
+        // 1. Check local pending backpressure
+        match self.txn_tracker.check_pending_backpressure() {
+            BackpressureAction::Pause => {
+                if let Some(producer_addr) = &self.producer_addr {
+                    producer_addr.do_send(PauseProducer);
+                }
+            }
+            BackpressureAction::Resume => {
+                if let Some(producer_addr) = &self.producer_addr {
+                    producer_addr.do_send(ResumeProducer);
+                }
+            }
+            BackpressureAction::None => {}
+        }
+
+        // 2. Perform sampling check
         let tasks = self.txn_tracker.perform_sampling_check();
+        let consumer_addr = self.consumer_addr.clone();
         if !tasks.is_empty() {
             ctx.spawn(
                 future::join_all(tasks)
                     .into_actor(self)
                     .map(move |results, act, _ctx| {
-                        // Handle all parallel execution results
-                        act.txn_tracker.handle_receipt_result(results);
+                        // Process results and get retry queue
+                        let retry_queue = act.txn_tracker.handle_receipt_result(results);
+
+                        // 3. Send retries to consumer
+                        if let Some(consumer) = &consumer_addr {
+                            for retry_txn in retry_queue {
+                                consumer.do_send(RetryTxn {
+                                    signed_bytes: retry_txn.signed_bytes,
+                                    metadata: retry_txn.metadata,
+                                });
+                            }
+                        }
                     }),
             );
         }
