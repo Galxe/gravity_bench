@@ -450,14 +450,27 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         let addr = account.clone();
         let pb = pb.clone();
         async move {
-            let init_nonce = client.get_txn_count(addr).await;
-            match init_nonce {
-                Ok(init_nonce) => {
-                    nonce.store(init_nonce, Ordering::Relaxed);
+            let mut init_nonce = None;
+            {
+                for _ in 0..3 {
+                    let res = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        client.get_txn_count(addr),
+                    )
+                    .await;
+                    if res.is_ok() {
+                        init_nonce = res.ok();
+                        break;
+                    }
+                }
+            }
+            match &init_nonce {
+                Some(Ok(init_nonce)) => {
+                    nonce.store(*init_nonce, Ordering::Relaxed);
                     pb.inc(1);
                 }
-                Err(e) => {
-                    tracing::error!("Failed to get nonce for address: {}: {}", addr, e);
+                _ => {
+                    tracing::error!("Failed to get nonce for address: {:?}", init_nonce);
                     panic!("Failed to get nonce for address: {}", addr);
                 }
             }
