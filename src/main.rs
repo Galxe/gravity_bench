@@ -105,8 +105,11 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
         let faucet_level_plan =
             faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
 
-        let rx = run_plan(faucet_level_plan, producer).await?;
-        rx.await??;
+        let rx = run_plan(faucet_level_plan, producer).await;
+        match rx {
+            Ok(rx) => rx.await??,
+            Err(err) => tracing::error!("Failed to run plan: {}", err),
+        }
         if wait_duration_secs > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(wait_duration_secs)).await;
         }
