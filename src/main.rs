@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
-use tracing::{info, Level};
+use tracing::{error, info, Level};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
@@ -173,7 +173,12 @@ async fn test_uniswap(
                 continue;
             }
         };
-        let _ = rx.await??;
+        // Spawn waiting in background to allow parallel plan execution
+        tokio::spawn(async move {
+            if let Err(e) = rx.await {
+                error!("Plan execution failed: {:?}", e);
+            }
+        });
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
@@ -212,7 +217,12 @@ async fn test_erc20_transfer(
                 continue;
             }
         };
-        let _ = rx.await??;
+        // Spawn waiting in background to allow parallel plan execution
+        tokio::spawn(async move {
+            if let Err(e) = rx.await {
+                error!("Plan execution failed: {:?}", e);
+            }
+        });
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
