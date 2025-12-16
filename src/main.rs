@@ -165,7 +165,15 @@ async fn test_uniswap(
             contract_config.get_router_address().unwrap(),
             tps,
         );
-        let _rx = run_plan(plan, producer).await?;
+        let rx = match run_plan(plan, producer).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                info!("Failed to submit plan: {}. Retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        let _ = rx.await??;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
@@ -196,7 +204,15 @@ async fn test_erc20_transfer(
             address_pool.clone(),
             tps,
         );
-        let _rx = run_plan(erc20_transfer, producer).await?;
+        let rx = match run_plan(erc20_transfer, producer).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                info!("Failed to submit plan: {}. Retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        let _ = rx.await??;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     Ok(())
@@ -452,7 +468,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         async move {
             let mut init_nonce = None;
             {
-                for _ in 0..3 {
+                for _ in 0..5 {
                     let res = tokio::time::timeout(
                         std::time::Duration::from_secs(10),
                         client.get_txn_count(addr),
