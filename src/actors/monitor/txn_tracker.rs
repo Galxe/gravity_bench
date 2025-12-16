@@ -23,7 +23,8 @@ const MAX_PENDING_TXNS: usize = 100_000;
 const BACKPRESSURE_RESUME_THRESHOLD: usize = 80_000; // 80% of max
 
 // Retry configuration
-const RETRY_TIMEOUT: Duration = Duration::from_secs(60); // Retry if stuck for 60s
+const RETRY_TIMEOUT: Duration = Duration::from_secs(120); // Retry if stuck for 120s
+const MAX_RETRY_BATCH: usize = 10_000; // Max transactions to retry per batch
 
 /// Format large numbers with appropriate suffixes (K, M, B)
 fn format_large_number(num: u64) -> String {
@@ -507,43 +508,77 @@ impl TxnTracker {
             }
         }
 
-        // 4. Process failed or still pending transactions from this sampling
-        // Retry logic: if stuck for RETRY_TIMEOUT (60s), queue for retry
-        // Final failure only at TXN_TIMEOUT (10 min)
-        for info in failed_txns {
-            if info.submit_time.elapsed() > TXN_TIMEOUT {
-                // Transaction has completely timed out (10 min), mark as failed
-                error!(
-                    "Transaction completely timed out: plan_id={}, tx_hash={:?}",
-                    info.metadata.plan_id, info.tx_hash
-                );
-                self.pending_txns.remove(&info);
-                if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                    plan_tracker.resolved_transactions += 1;
-                    plan_tracker.failed_executions += 1;
-                    self.total_failed_executions += 1;
-                    self.resolved_txn_timestamps.push_back(Instant::now());
-                    self.total_resolved_transactions += 1;
-                }
-            } else if info.submit_time.elapsed() > RETRY_TIMEOUT {
-                // Transaction stuck for 60s, queue for retry
+        // 4. Process failed or still pending transactions
+        // Find the youngest (latest submit_time) transaction that has timed out (>120s)
+        // Then retry ALL transactions older than or equal to it (up to MAX_RETRY_BATCH)
+        let retry_cutoff: Option<PendingTxInfo> = failed_txns
+            .iter()
+            .filter(|info| info.submit_time.elapsed() > RETRY_TIMEOUT)
+            .max_by_key(|info| info.submit_time)
+            .cloned();
+
+        if let Some(cutoff) = retry_cutoff {
+            // Collect all transactions older than or equal to the cutoff
+            let to_process: Vec<_> = self
+                .pending_txns
+                .iter()
+                .take_while(|info| info.submit_time <= cutoff.submit_time)
+                .take(MAX_RETRY_BATCH)
+                .cloned()
+                .collect();
+
+            let batch_size = to_process.len();
+            if batch_size > 0 {
                 warn!(
-                    "Transaction {} stuck for {}s, queuing for retry",
-                    info.tx_hash,
-                    info.submit_time.elapsed().as_secs()
+                    "Detected stuck transactions, processing interval of {} txns (cutoff tx={}, stuck for {}s)",
+                    batch_size,
+                    cutoff.tx_hash,
+                    cutoff.submit_time.elapsed().as_secs()
                 );
+            }
+
+            for info in to_process {
                 self.pending_txns.remove(&info);
-                retry_queue.push(RetryTxnInfo {
-                    signed_bytes: info.signed_bytes.clone(),
-                    metadata: info.metadata.clone(),
-                });
-            } else {
-                // Not timed out, put back in main queue for next round check
-                debug!(
-                    "Re-inserting pending transaction: tx_hash={:?}",
-                    info.tx_hash
-                );
-                self.pending_txns.insert(info);
+
+                if info.submit_time.elapsed() > TXN_TIMEOUT {
+                    // Transaction has completely timed out (10 min), mark as failed
+                    error!(
+                        "Transaction completely timed out: plan_id={}, tx_hash={:?}",
+                        info.metadata.plan_id, info.tx_hash
+                    );
+                    if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
+                        plan_tracker.resolved_transactions += 1;
+                        plan_tracker.failed_executions += 1;
+                        self.total_failed_executions += 1;
+                        self.resolved_txn_timestamps.push_back(Instant::now());
+                        self.total_resolved_transactions += 1;
+                    }
+                } else {
+                    // Queue for retry (and remove from pending to avoid duplicate retry)
+                    retry_queue.push(RetryTxnInfo {
+                        signed_bytes: info.signed_bytes.clone(),
+                        metadata: info.metadata.clone(),
+                    });
+                }
+            }
+        } else {
+            // No timed-out transactions in samples, just re-insert failed ones
+            for info in failed_txns {
+                if info.submit_time.elapsed() > TXN_TIMEOUT {
+                    error!(
+                        "Transaction completely timed out: plan_id={}, tx_hash={:?}",
+                        info.metadata.plan_id, info.tx_hash
+                    );
+                    self.pending_txns.remove(&info);
+                    if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
+                        plan_tracker.resolved_transactions += 1;
+                        plan_tracker.failed_executions += 1;
+                        self.total_failed_executions += 1;
+                        self.resolved_txn_timestamps.push_back(Instant::now());
+                        self.total_resolved_transactions += 1;
+                    }
+                }
+                // If not timed out, they stay in pending_txns (already there from earlier)
             }
         }
 
