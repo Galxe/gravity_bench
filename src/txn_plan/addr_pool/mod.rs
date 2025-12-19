@@ -1,7 +1,6 @@
 use crate::util::gen_account::AccountId;
 
 pub mod managed_address_pool;
-#[allow(unused)]
 pub mod weighted_address_pool;
 
 #[async_trait::async_trait]

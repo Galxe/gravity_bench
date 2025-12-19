@@ -1,12 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
-use alloy::primitives::Address;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
-use tokio::sync::RwLock;
 
 use super::AddressPool;
-use crate::util::gen_account::{AccountGenerator, AccountId, AccountManager};
+use crate::util::gen_account::{AccountId, AccountManager};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum AccountCategory {
@@ -29,6 +27,7 @@ struct Inner {
 
 pub struct WeightedAddressPool {
     inner: Mutex<Inner>,
+    #[allow(unused)]
     account_generator: AccountManager,
 }
 

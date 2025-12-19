@@ -8,6 +8,8 @@ nodes = [
 ]
 num_tokens=2
 enable_swap_token = false
+# Address pool type: "random" (default) or "weighted" (hot/normal/long-tail distribution)
+address_pool_type = "random"
 # Faucet and deployer account configuration
 [faucet]
 # Private key (example, please replace with real private key, the follows is a example of reth)
