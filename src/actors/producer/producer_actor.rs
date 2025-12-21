@@ -311,13 +311,18 @@ impl Handler<ExeFrontPlan> for Producer {
                 None
             }
             .into_actor(self)
-            .map(|maybe_plan, act, _ctx| {
+            .map(|maybe_plan, act, ctx| {
                 // This block runs after the async block is complete, safely on the actor's context.
                 if let Some(plan) = maybe_plan {
                     act.stats.remain_plans_num += 1;
                     // CRITICAL: If the plan was not ready, push it back to the *front* of the queue
                     // to ensure strict sequential execution. No other plan can run before it.
                     act.plan_queue.push_front(plan);
+                    // Re-trigger plan execution after a short delay to avoid busy-looping.
+                    // This ensures the plan is retried when accounts become ready.
+                    ctx.run_later(Duration::from_millis(100), |act, ctx| {
+                        act.trigger_next_plan_if_needed(ctx);
+                    });
                 }
             }),
         )
