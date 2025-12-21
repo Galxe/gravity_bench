@@ -1,6 +1,6 @@
 use actix::prelude::*;
 use dashmap::DashMap;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,10 +74,14 @@ pub struct Producer {
     account_generator: AccountManager,
 
     /// A queue of plans waiting to be executed. Plans are processed in FIFO order.
+    /// Only this queue is subject to max_queue_size limit.
     plan_queue: VecDeque<Box<dyn TxnPlan>>,
-    /// Tracks pending plans to respond to the original requester upon completion.
-    pending_plans: HashMap<PlanId, tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>>,
-    /// The maximum number of plans allowed in the queue.
+    /// Plans that have finished producing transactions but are awaiting completion confirmation.
+    /// These do NOT count towards the queue size limit.
+    awaiting_completion: HashSet<PlanId>,
+    /// Global responder management across all plan states.
+    plan_responders: HashMap<PlanId, tokio::sync::oneshot::Sender<Result<(), anyhow::Error>>>,
+    /// The maximum number of plans allowed in the queue (only applies to plan_queue).
     max_queue_size: usize,
 }
 
@@ -112,7 +116,8 @@ impl Producer {
             monitor_addr,
             consumer_addr,
             plan_queue: VecDeque::new(),
-            pending_plans: HashMap::new(),
+            awaiting_completion: HashSet::new(),
+            plan_responders: HashMap::new(),
             max_queue_size: 10,
         })
     }
@@ -282,7 +287,7 @@ impl Handler<ExeFrontPlan> for Producer {
                 if !is_ready {
                     // If not ready, return the plan so it can be put back at the front of the queue.
                     tracing::debug!("Plan '{}' is not ready, re-queuing at front.", plan.name());
-                    return Some(plan);
+                    return Err(plan);
                 }
 
                 // If ready, execute the plan.
@@ -305,24 +310,31 @@ impl Handler<ExeFrontPlan> for Producer {
                         plan_id,
                         reason: e.to_string(),
                     });
+                    return Ok(None);
                 }
 
-                // Return None as the plan has been consumed (either successfully started or failed).
-                None
+                // Return the plan_id for adding to awaiting_completion
+                Ok(Some(plan_id))
             }
             .into_actor(self)
-            .map(|maybe_plan, act, ctx| {
-                // This block runs after the async block is complete, safely on the actor's context.
-                if let Some(plan) = maybe_plan {
-                    act.stats.remain_plans_num += 1;
-                    // CRITICAL: If the plan was not ready, push it back to the *front* of the queue
-                    // to ensure strict sequential execution. No other plan can run before it.
-                    act.plan_queue.push_front(plan);
-                    // Re-trigger plan execution after a short delay to avoid busy-looping.
-                    // This ensures the plan is retried when accounts become ready.
-                    ctx.run_later(Duration::from_millis(100), |act, ctx| {
-                        act.trigger_next_plan_if_needed(ctx);
-                    });
+            .map(|result, act, ctx| {
+                match result {
+                    Err(plan) => {
+                        // Plan was not ready, push it back to the front of the queue
+                        act.stats.remain_plans_num += 1;
+                        act.plan_queue.push_front(plan);
+                        // Re-trigger plan execution after a short delay to avoid busy-looping.
+                        ctx.run_later(Duration::from_millis(100), |act, ctx| {
+                            act.trigger_next_plan_if_needed(ctx);
+                        });
+                    }
+                    Ok(Some(plan_id)) => {
+                        // Plan executed successfully, move to awaiting_completion
+                        act.awaiting_completion.insert(plan_id);
+                    }
+                    Ok(None) => {
+                        // Plan failed, already handled via PlanFailed message
+                    }
                 }
             }),
         )
@@ -334,7 +346,8 @@ impl Handler<RegisterTxnPlan> for Producer {
     type Result = ResponseFuture<Result<(), anyhow::Error>>;
 
     fn handle(&mut self, msg: RegisterTxnPlan, ctx: &mut Self::Context) -> Self::Result {
-        if self.pending_plans.len() >= self.max_queue_size {
+        // Only limit the queue size for plans waiting to be executed
+        if self.plan_queue.len() >= self.max_queue_size {
             return Box::pin(async { Err(anyhow::anyhow!("Producer plan queue is full")) });
         }
 
@@ -348,7 +361,8 @@ impl Handler<RegisterTxnPlan> for Producer {
 
         // Add the plan to the back of the queue.
         self.plan_queue.push_back(msg.plan);
-        self.pending_plans.insert(plan_id, msg.responder);
+        // Store the responder globally (will respond when plan completes)
+        self.plan_responders.insert(plan_id, msg.responder);
 
         // A new plan has been added, so we attempt to trigger execution.
         // This is done synchronously within the handler to avoid race conditions.
@@ -369,7 +383,9 @@ impl Handler<PlanCompleted> for Producer {
             self.plan_queue.len()
         );
         self.stats.success_plans_num += 1;
-        if let Some(responder) = self.pending_plans.remove(&msg.plan_id) {
+        // Remove from awaiting_completion and respond to the original requester
+        self.awaiting_completion.remove(&msg.plan_id);
+        if let Some(responder) = self.plan_responders.remove(&msg.plan_id) {
             let _ = responder.send(Ok(()));
         }
 
@@ -390,8 +406,9 @@ impl Handler<PlanFailed> for Producer {
             self.plan_queue.len()
         );
         self.stats.failed_plans_num += 1;
-
-        if let Some(responder) = self.pending_plans.remove(&msg.plan_id) {
+        // Remove from awaiting_completion and respond with error
+        self.awaiting_completion.remove(&msg.plan_id);
+        if let Some(responder) = self.plan_responders.remove(&msg.plan_id) {
             let _ = responder.send(Err(anyhow::anyhow!("Plan failed: {}", msg.reason)));
         }
 
