@@ -331,6 +331,8 @@ impl Handler<ExeFrontPlan> for Producer {
                     Ok(Some(plan_id)) => {
                         // Plan executed successfully, move to awaiting_completion
                         act.awaiting_completion.insert(plan_id);
+                        // Trigger execution of the next plan in the queue
+                        act.trigger_next_plan_if_needed(ctx);
                     }
                     Ok(None) => {
                         // Plan failed, already handled via PlanFailed message
