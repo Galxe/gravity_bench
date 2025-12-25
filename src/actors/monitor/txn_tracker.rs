@@ -19,8 +19,8 @@ const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
 
 // Backpressure configuration
-const MAX_PENDING_TXNS: usize = 100_000;
-const BACKPRESSURE_RESUME_THRESHOLD: usize = 80_000; // 80% of max
+const MAX_PENDING_TXNS: usize = 200_000;
+const BACKPRESSURE_RESUME_THRESHOLD: usize = 160_000; // 80% of max
 
 // Retry configuration
 const RETRY_TIMEOUT: Duration = Duration::from_secs(120); // Retry if stuck for 120s

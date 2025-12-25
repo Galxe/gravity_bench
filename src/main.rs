@@ -365,12 +365,26 @@ async fn start_bench() -> Result<()> {
 
     let account_manager = accout_generator.to_manager();
 
-    let address_pool: Arc<dyn AddressPool> = Arc::new(
-        txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(
-            account_ids.clone(),
-            account_manager.clone(),
-        ),
-    );
+    let address_pool: Arc<dyn AddressPool> = match benchmark_config.address_pool_type {
+        config::AddressPoolType::Random => {
+            info!("Using RandomAddressPool");
+            Arc::new(
+                txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(
+                    account_ids.clone(),
+                    account_manager.clone(),
+                ),
+            )
+        }
+        config::AddressPoolType::Weighted => {
+            info!("Using WeightedAddressPool");
+            Arc::new(
+                txn_plan::addr_pool::weighted_address_pool::WeightedAddressPool::new(
+                    account_ids.clone(),
+                    account_manager.clone(),
+                ),
+            )
+        }
+    };
 
     // Use the same client instances for Consumer to share metrics
     let eth_providers: Vec<EthHttpCli> = eth_clients

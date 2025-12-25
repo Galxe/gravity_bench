@@ -3,6 +3,15 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 
+/// Address pool type selection
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AddressPoolType {
+    #[default]
+    Random,
+    Weighted,
+}
+
 /// Complete configuration structure
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BenchConfig {
@@ -14,6 +23,8 @@ pub struct BenchConfig {
     pub num_tokens: usize,
     pub target_tps: u64,
     pub enable_swap_token: bool,
+    #[serde(default)]
+    pub address_pool_type: AddressPoolType,
 }
 
 /// Node and chain configuration
