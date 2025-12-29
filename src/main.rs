@@ -18,6 +18,8 @@ use std::{
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
 use tracing::{error, info, Level};
 
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
     config::{BenchConfig, ContractConfig},
@@ -257,12 +259,45 @@ async fn start_bench() -> Result<()> {
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_file(false)
-        .with_line_number(false)
-        .with_thread_ids(false)
-        .init();
+
+    // Initialize tracing
+    let log_path = benchmark_config.log_path.trim();
+
+    if log_path.is_empty() || log_path.eq_ignore_ascii_case("console") {
+        // Console only
+        tracing_subscriber::fmt()
+            .with_max_level(Level::INFO)
+            .with_file(false)
+            .with_line_number(false)
+            .with_thread_ids(false)
+            .init();
+    } else {
+        // File logging
+        let path = std::path::Path::new(log_path);
+        let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let filename = path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("gravity_bench.log"));
+        
+        // Ensure directory exists
+        std::fs::create_dir_all(directory).unwrap();
+
+        let file_appender = tracing_appender::rolling::daily(directory, filename);
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+            )
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stdout)
+                    .with_file(false)
+                    .with_line_number(false)
+                    .with_thread_ids(false)
+            )
+            .init();
+    }
 
     let contract_config = if args.recover {
         info!("Starting in recovery mode...");

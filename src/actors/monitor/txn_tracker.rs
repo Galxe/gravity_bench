@@ -770,6 +770,6 @@ impl TxnTracker {
             Cell::new(&format_large_number(self.producer_sending_txns)).fg(Color::Yellow),
         ]);
 
-        println!("{}", table);
+        tracing::info!("\n{}", table);
     }
 }
