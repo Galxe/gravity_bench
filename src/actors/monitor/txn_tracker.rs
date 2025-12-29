@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use alloy::consensus::Account;
 use alloy::primitives::TxHash;
-use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
+use comfy_table::{presets::UTF8_FULL, Cell, Color, Table};
 use tracing::{debug, error, warn};
 
 use crate::actors::monitor::SubmissionResult;
@@ -615,22 +615,6 @@ impl TxnTracker {
             )
         };
 
-        let mut plan_summaries = Vec::new();
-
-        if !self.plan_trackers.is_empty() {
-            for (_plan_id, tracker) in &self.plan_trackers {
-                plan_summaries.push(format!(
-                    "{}: {}/{}",
-                    tracker.plan_name, tracker.resolved_transactions, tracker.produce_transactions
-                ));
-            }
-        } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
-            plan_summaries.push(format!(
-                "{}: {}/{} done",
-                tracker.plan_name, tracker.resolved_transactions, tracker.produce_transactions
-            ));
-        }
-
         // Calculate success rate
         let success_rate = if self.total_produced_transactions > 0 {
             self.total_resolved_transactions as f64 / self.total_produced_transactions as f64
@@ -639,175 +623,151 @@ impl TxnTracker {
             0.0
         };
 
+        // Count plan states
+        let mut produced_plans = 0u64;
+        let mut not_produced_plans = 0u64;
+        let mut completed_plans = 0u64;
+        let mut in_progress_plans = 0u64;
+        let mut timed_out_txns = 0u64;
+
+        for (_plan_id, tracker) in &self.plan_trackers {
+            if tracker.plan_produced {
+                produced_plans += 1;
+                if tracker.resolved_transactions as usize >= tracker.produce_transactions {
+                    completed_plans += 1;
+                } else {
+                    in_progress_plans += 1;
+                }
+            } else {
+                not_produced_plans += 1;
+            }
+        }
+
+        // Count timed out pending txns (those waiting > RETRY_TIMEOUT)
+        for pending_info in &self.pending_txns {
+            if pending_info.submit_time.elapsed() > RETRY_TIMEOUT {
+                timed_out_txns += 1;
+            }
+        }
+
+        let pending_txns = self.pending_txns.len() as u64;
+
         let mut table = Table::new();
         table.load_preset(UTF8_FULL);
 
-        // Set table header
+        // Set table header - summary statistics
         table.set_header(vec![
-            "Plan Name",
-            "Progress",
-            "Success%",
-            "SendFail",
-            "ExecFail",
-            "Status",
+            "Metric",
+            "Value",
+            "Metric",
+            "Value",
         ]);
 
-        // Add individual plan rows
-        if !self.plan_trackers.is_empty() {
-            for (_plan_id, tracker) in &self.plan_trackers {
-                let plan_success_rate = if tracker.resolved_transactions > 0 {
-                    let successful = tracker
-                        .resolved_transactions
-                        .saturating_sub(tracker.failed_submissions + tracker.failed_executions);
-                    successful as f64 / tracker.resolved_transactions as f64 * 100.0
-                } else if tracker.produce_transactions > 0 {
-                    // If no transactions resolved yet, can't calculate success rate
-                    0.0
-                } else {
-                    100.0
-                };
-
-                let progress_color =
-                    if tracker.resolved_transactions as usize >= tracker.produce_transactions {
-                        Color::Green
-                    } else {
-                        Color::Yellow
-                    };
-
-                let status = if tracker.plan_produced
-                    && tracker.resolved_transactions as usize >= tracker.produce_transactions
-                {
-                    if tracker.failed_submissions + tracker.failed_executions > 0 {
-                        "Completed (w/ Errors)"
-                    } else {
-                        "Completed"
-                    }
-                } else {
-                    "In Progress"
-                };
-
-                table.add_row(vec![
-                    Cell::new(&tracker.plan_name).fg(Color::Cyan),
-                    Cell::new(&format!(
-                        "{}/{}",
-                        format_large_number(tracker.resolved_transactions),
-                        format_large_number(tracker.produce_transactions as u64)
-                    ))
-                    .fg(progress_color),
-                    Cell::new(&format!("{:.1}", plan_success_rate)).fg(
-                        if plan_success_rate >= 95.0 {
-                            Color::Green
-                        } else if plan_success_rate >= 80.0 {
-                            Color::Yellow
-                        } else {
-                            Color::Red
-                        },
-                    ),
-                    Cell::new(&format_large_number(tracker.failed_submissions)).fg(
-                        if tracker.failed_submissions > 0 {
-                            Color::Red
-                        } else {
-                            Color::Green
-                        },
-                    ),
-                    Cell::new(&format_large_number(tracker.failed_executions)).fg(
-                        if tracker.failed_executions > 0 {
-                            Color::Red
-                        } else {
-                            Color::Green
-                        },
-                    ),
-                    Cell::new(status).fg(if status.contains("Completed") {
-                        Color::Green
-                    } else {
-                        Color::Yellow
-                    }),
-                ]);
-            }
-        } else if let Some((_plan_id, tracker)) = &self.last_completed_plan {
-            let plan_success_rate = if tracker.resolved_transactions > 0 {
-                let successful = tracker
-                    .resolved_transactions
-                    .saturating_sub(tracker.failed_submissions + tracker.failed_executions);
-                successful as f64 / tracker.resolved_transactions as f64 * 100.0
-            } else {
-                100.0
-            };
-
-            table.add_row(vec![
-                Cell::new(&format!("{} (Last)", tracker.plan_name)).fg(Color::DarkGrey),
-                Cell::new(&format!(
-                    "{}/{}",
-                    format_large_number(tracker.resolved_transactions),
-                    format_large_number(tracker.produce_transactions as u64)
-                ))
-                .fg(Color::Green),
-                Cell::new(&format!("{:.1}", plan_success_rate)).fg(Color::Green),
-                Cell::new(&format_large_number(tracker.failed_submissions)).fg(
-                    if tracker.failed_submissions > 0 {
-                        Color::Red
-                    } else {
-                        Color::Green
-                    },
-                ),
-                Cell::new(&format_large_number(tracker.failed_executions)).fg(
-                    if tracker.failed_executions > 0 {
-                        Color::Red
-                    } else {
-                        Color::Green
-                    },
-                ),
-                Cell::new("Done").fg(Color::Green),
-            ]);
-        }
-
-        // Add summary row
+        // Row 1: Txn progress and TPS
         table.add_row(vec![
-            Cell::new("TOTAL")
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
+            Cell::new("Progress").fg(Color::Cyan),
             Cell::new(&format!(
                 "{}/{}",
                 format_large_number(self.total_resolved_transactions),
                 format_large_number(self.total_produced_transactions)
             ))
-            .add_attribute(Attribute::Bold)
-            .fg(Color::Blue),
-            Cell::new(&format!("{:.1}", success_rate))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format_large_number(self.total_failed_submissions))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format_large_number(self.total_failed_executions))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format!(
-                "TPS:{:.1} | Lat: {:.1}s | Pool:{}/{}",
-                tps,
-                avg_latency.as_secs_f64(),
-                format_large_number(self.mempool_pending),
-                format_large_number(self.mempool_queued)
-            ))
-            .add_attribute(Attribute::Bold)
-            .fg(Color::Magenta),
+            .fg(Color::Green),
+            Cell::new("TPS").fg(Color::Cyan),
+            Cell::new(&format!("{:.1}", tps)).fg(Color::Magenta),
         ]);
 
+        // Row 2: Pending txns and latency
         table.add_row(vec![
-            Cell::new("SYSTEM")
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Yellow),
-            Cell::new(""), // Progress placeholder
-            Cell::new(""), // Success% placeholder
-            Cell::new(""), // SendFail placeholder
-            Cell::new(""), // ExecFail placeholder
-            Cell::new(&format!(
-                "Ready Accounts: {} | Processing: {}",
-                format_large_number(self.producer_ready_accounts),
-                format_large_number(self.producer_sending_txns)
-            ))
-            .add_attribute(Attribute::Bold)
-            .fg(Color::Yellow),
+            Cell::new("Pending Txns").fg(Color::Cyan),
+            Cell::new(&format_large_number(pending_txns)).fg(
+                if pending_txns > MAX_PENDING_TXNS as u64 / 2 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                },
+            ),
+            Cell::new("Avg Latency").fg(Color::Cyan),
+            Cell::new(&format!("{:.1}s", avg_latency.as_secs_f64())).fg(Color::Magenta),
+        ]);
+
+        // Row 3: Timed out txns and success rate
+        table.add_row(vec![
+            Cell::new("Timed Out Txns").fg(Color::Cyan),
+            Cell::new(&format_large_number(timed_out_txns)).fg(
+                if timed_out_txns > 0 {
+                    Color::Red
+                } else {
+                    Color::Green
+                },
+            ),
+            Cell::new("Success%").fg(Color::Cyan),
+            Cell::new(&format!("{:.1}%", success_rate)).fg(
+                if success_rate >= 95.0 {
+                    Color::Green
+                } else if success_rate >= 80.0 {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                },
+            ),
+        ]);
+
+        // Row 4: Produced plans and not produced plans
+        table.add_row(vec![
+            Cell::new("Produced Plans").fg(Color::Cyan),
+            Cell::new(&format_large_number(produced_plans)).fg(Color::Green),
+            Cell::new("Not Produced").fg(Color::Cyan),
+            Cell::new(&format_large_number(not_produced_plans)).fg(
+                if not_produced_plans > 0 {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                },
+            ),
+        ]);
+
+        // Row 5: Completed plans and in progress plans
+        table.add_row(vec![
+            Cell::new("Completed Plans").fg(Color::Cyan),
+            Cell::new(&format_large_number(completed_plans)).fg(Color::Green),
+            Cell::new("In Progress").fg(Color::Cyan),
+            Cell::new(&format_large_number(in_progress_plans)).fg(Color::Yellow),
+        ]);
+
+        // Row 6: Send failures and execution failures
+        table.add_row(vec![
+            Cell::new("Send Failures").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.total_failed_submissions)).fg(
+                if self.total_failed_submissions > 0 {
+                    Color::Red
+                } else {
+                    Color::Green
+                },
+            ),
+            Cell::new("Exec Failures").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.total_failed_executions)).fg(
+                if self.total_failed_executions > 0 {
+                    Color::Red
+                } else {
+                    Color::Green
+                },
+            ),
+        ]);
+
+        // Row 7: Mempool stats
+        table.add_row(vec![
+            Cell::new("Pool Pending").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.mempool_pending)).fg(Color::Yellow),
+            Cell::new("Pool Queued").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.mempool_queued)).fg(Color::Yellow),
+        ]);
+
+        // Row 8: Producer stats
+        table.add_row(vec![
+            Cell::new("Ready Accounts").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.producer_ready_accounts)).fg(Color::Yellow),
+            Cell::new("Processing").fg(Color::Cyan),
+            Cell::new(&format_large_number(self.producer_sending_txns)).fg(Color::Yellow),
         ]);
 
         println!("{}", table);
