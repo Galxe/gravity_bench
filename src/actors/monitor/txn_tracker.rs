@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use alloy::consensus::Account;
 use alloy::primitives::TxHash;
-use comfy_table::{presets::UTF8_FULL, Cell, Color, Table};
+use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use tracing::{debug, error, warn};
 
 use crate::actors::monitor::SubmissionResult;
@@ -665,109 +665,70 @@ impl TxnTracker {
 
         // Row 1: Txn progress and TPS
         table.add_row(vec![
-            Cell::new("Progress").fg(Color::Cyan),
+            Cell::new("Progress"),
             Cell::new(&format!(
                 "{}/{}",
                 format_large_number(self.total_resolved_transactions),
                 format_large_number(self.total_produced_transactions)
-            ))
-            .fg(Color::Green),
-            Cell::new("TPS").fg(Color::Cyan),
-            Cell::new(&format!("{:.1}", tps)).fg(Color::Magenta),
+            )),
+            Cell::new("TPS"),
+            Cell::new(&format!("{:.1}", tps)),
         ]);
 
         // Row 2: Pending txns and latency
         table.add_row(vec![
-            Cell::new("Pending Txns").fg(Color::Cyan),
-            Cell::new(&format_large_number(pending_txns)).fg(
-                if pending_txns > MAX_PENDING_TXNS as u64 / 2 {
-                    Color::Yellow
-                } else {
-                    Color::Green
-                },
-            ),
-            Cell::new("Avg Latency").fg(Color::Cyan),
-            Cell::new(&format!("{:.1}s", avg_latency.as_secs_f64())).fg(Color::Magenta),
+            Cell::new("Pending Txns"),
+            Cell::new(&format_large_number(pending_txns)),
+            Cell::new("Avg Latency"),
+            Cell::new(&format!("{:.1}s", avg_latency.as_secs_f64())),
         ]);
 
         // Row 3: Timed out txns and success rate
         table.add_row(vec![
-            Cell::new("Timed Out Txns").fg(Color::Cyan),
-            Cell::new(&format_large_number(timed_out_txns)).fg(
-                if timed_out_txns > 0 {
-                    Color::Red
-                } else {
-                    Color::Green
-                },
-            ),
-            Cell::new("Success%").fg(Color::Cyan),
-            Cell::new(&format!("{:.1}%", success_rate)).fg(
-                if success_rate >= 95.0 {
-                    Color::Green
-                } else if success_rate >= 80.0 {
-                    Color::Yellow
-                } else {
-                    Color::Red
-                },
-            ),
+            Cell::new("Timed Out Txns"),
+            Cell::new(&format_large_number(timed_out_txns)),
+            Cell::new("Success%"),
+            Cell::new(&format!("{:.1}%", success_rate)),
         ]);
 
         // Row 4: Produced plans and not produced plans
         table.add_row(vec![
-            Cell::new("Produced Plans").fg(Color::Cyan),
-            Cell::new(&format_large_number(produced_plans)).fg(Color::Green),
-            Cell::new("Not Produced").fg(Color::Cyan),
-            Cell::new(&format_large_number(not_produced_plans)).fg(
-                if not_produced_plans > 0 {
-                    Color::Yellow
-                } else {
-                    Color::Green
-                },
-            ),
+            Cell::new("Produced Plans"),
+            Cell::new(&format_large_number(produced_plans)),
+            Cell::new("Not Produced"),
+            Cell::new(&format_large_number(not_produced_plans)),
         ]);
 
         // Row 5: Completed plans and in progress plans
         table.add_row(vec![
-            Cell::new("Completed Plans").fg(Color::Cyan),
-            Cell::new(&format_large_number(completed_plans)).fg(Color::Green),
-            Cell::new("In Progress").fg(Color::Cyan),
-            Cell::new(&format_large_number(in_progress_plans)).fg(Color::Yellow),
+            Cell::new("Completed Plans"),
+            Cell::new(&format_large_number(completed_plans)),
+            Cell::new("In Progress"),
+            Cell::new(&format_large_number(in_progress_plans)),
         ]);
 
         // Row 6: Send failures and execution failures
         table.add_row(vec![
-            Cell::new("Send Failures").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.total_failed_submissions)).fg(
-                if self.total_failed_submissions > 0 {
-                    Color::Red
-                } else {
-                    Color::Green
-                },
-            ),
-            Cell::new("Exec Failures").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.total_failed_executions)).fg(
-                if self.total_failed_executions > 0 {
-                    Color::Red
-                } else {
-                    Color::Green
-                },
-            ),
+            Cell::new("Send Failures"),
+            Cell::new(&format_large_number(self.total_failed_submissions)),
+            Cell::new("Exec Failures"),
+            Cell::new(&format_large_number(self.total_failed_executions)),
         ]);
 
         // Row 7: Mempool stats
         table.add_row(vec![
-            Cell::new("Pool Pending").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.mempool_pending)).fg(Color::Yellow),
-            Cell::new("Pool Queued").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.mempool_queued)).fg(Color::Yellow),
+            Cell::new("Pool Pending"),
+            Cell::new(&format_large_number(self.mempool_pending)),
+            Cell::new("Pool Queued"),
+            Cell::new(&format_large_number(self.mempool_queued)),
         ]);
 
         // Row 8: Producer stats
         table.add_row(vec![
-            Cell::new("Ready Accounts").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.producer_ready_accounts)).fg(Color::Yellow),
-            Cell::new("Processing").fg(Color::Cyan),
-            Cell::new(&format_large_number(self.producer_sending_txns)).fg(Color::Yellow),
+            Cell::new("Ready Accounts"),
+            Cell::new(&format_large_number(self.producer_ready_accounts)),
+            Cell::new("Processing"),
+            Cell::new(&format_large_number(self.producer_sending_txns)),
         ]);
 
         tracing::info!("\n{}", table);
