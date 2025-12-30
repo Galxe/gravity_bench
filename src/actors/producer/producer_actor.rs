@@ -202,6 +202,11 @@ impl Producer {
                     plan.name(),
                     e
                 );
+
+                monitor_addr.do_send(PlanFailed {
+                    plan_id: plan_id.clone(),
+                    reason: format!("Consumer send error: {}", e),
+                });
                 return Err(anyhow::anyhow!(
                     "Failed to send transaction to Consumer: {}",
                     e

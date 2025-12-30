@@ -56,6 +56,7 @@ pub struct TxnTracker {
     total_resolved_transactions: u64,
     total_failed_submissions: u64,
     total_failed_executions: u64,
+    total_failed_production_plans: u64,
     last_completed_plan: Option<(PlanId, PlanTracker)>,
     producer_ready_accounts: u64,
     producer_sending_txns: u64,
@@ -80,6 +81,8 @@ struct PlanTracker {
     failed_executions: u64,
 
     plan_produced: bool,
+    /// Indicates if the plan failed during production (e.g. consumer error)
+    plan_failed_production: bool,
 
     plan_name: String,
 }
@@ -164,6 +167,7 @@ impl TxnTracker {
             total_resolved_transactions: 0,
             total_failed_submissions: 0,
             total_failed_executions: 0,
+            total_failed_production_plans: 0,
             last_completed_plan: None,
             producer_ready_accounts: 0,
             producer_sending_txns: 0,
@@ -228,10 +232,21 @@ impl TxnTracker {
             consumed_transactions: 0,
             failed_submissions: 0,
             failed_executions: 0,
+
             plan_produced: false,
+            plan_failed_production: false,
             plan_name,
         };
         self.plan_trackers.insert(plan_id, tracker);
+    }
+
+    pub fn mark_plan_failed(&mut self, plan_id: PlanId) {
+        if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
+            tracker.plan_failed_production = true;
+            // Also mark as produced so it doesn't count as "Not Produced" (pending)
+            tracker.plan_produced = true;
+            self.total_failed_production_plans += 1;
+        }
     }
 
     /// Handle transaction submission result
@@ -631,7 +646,17 @@ impl TxnTracker {
         let mut timed_out_txns = 0u64;
 
         for (_plan_id, tracker) in &self.plan_trackers {
-            if tracker.plan_produced {
+            if tracker.plan_failed_production {
+                // Counted separately or as completed failed? 
+                // Let's count it as completed (failed) for the "Completed Plans" metric if we consider it "Done"
+                // But for clarity, let's keep it separate or part of "Not Produced" logic? 
+                // The requirement is to explain "Not Produced". 
+                // If we set plan_produced=true in mark_plan_failed, it lands here.
+                
+                // If failed production, it contributes to "Prod Failures" but we should decide if it's "Completed".
+                // Since it will never produce more txns, it is effectively completed (failed).
+                completed_plans += 1;
+            } else if tracker.plan_produced {
                 produced_plans += 1;
                 if tracker.resolved_transactions as usize >= tracker.produce_transactions {
                     completed_plans += 1;
@@ -696,7 +721,7 @@ impl TxnTracker {
             Cell::new("Produced Plans"),
             Cell::new(&format_large_number(produced_plans)),
             Cell::new("Not Produced"),
-            Cell::new(&format_large_number(not_produced_plans)),
+            Cell::new(&format!("{}/{}F", format_large_number(not_produced_plans), format_large_number(self.total_failed_production_plans))),
         ]);
 
         // Row 5: Completed plans and in progress plans

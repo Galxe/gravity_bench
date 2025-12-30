@@ -71,12 +71,15 @@ pub struct PlanCompleted {
     pub plan_id: PlanId,
 }
 
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PlanFailed {
     pub plan_id: PlanId,
     pub reason: String,
 }
+
+
 
 /// Message to retry a timed-out transaction
 #[derive(Message, Clone)]

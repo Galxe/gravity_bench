@@ -251,3 +251,12 @@ impl Handler<ReportProducerStats> for Monitor {
             .update_producer_stats(msg.ready_accounts, msg.sending_txns);
     }
 }
+
+impl Handler<PlanFailed> for Monitor {
+    type Result = ();
+
+    fn handle(&mut self, msg: PlanFailed, _ctx: &mut Self::Context) {
+        tracing::warn!("Plan {} failed: {}", msg.plan_id, msg.reason);
+        self.txn_tracker.mark_plan_failed(msg.plan_id);
+    }
+}
