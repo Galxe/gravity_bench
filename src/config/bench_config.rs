@@ -25,6 +25,12 @@ pub struct BenchConfig {
     pub enable_swap_token: bool,
     #[serde(default)]
     pub address_pool_type: AddressPoolType,
+    #[serde(default = "default_log_path")]
+    pub log_path: String,
+}
+
+fn default_log_path() -> String {
+    "./log.log".to_string()
 }
 
 /// Node and chain configuration

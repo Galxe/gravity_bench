@@ -7,14 +7,14 @@ use alloy::{
     rpc::types::TransactionReceipt,
 };
 use anyhow::{Context as AnyhowContext, Result};
-use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, Table};
+use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use url::Url;
 
 /// Format large numbers with appropriate suffixes (K, M, B)
@@ -336,7 +336,7 @@ impl EthHttpCli {
     pub async fn log_metrics_summary(&self) {
         let metrics = self.get_metrics().await;
         if metrics.per_method.is_empty() {
-            println!("RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
+            info!("RPC Metrics for [{}]: No requests recorded yet.", self.rpc);
             return;
         }
 
@@ -366,31 +366,13 @@ impl EthHttpCli {
                 0.0
             };
 
-            let color = if success_rate >= 95.0 {
-                Color::Green
-            } else if success_rate >= 80.0 {
-                Color::Yellow
-            } else {
-                Color::Red
-            };
-
             table.add_row(vec![
-                Cell::new(method).fg(Color::Cyan),
-                Cell::new(&format_large_number(stats.requests_sent)).fg(Color::White),
-                Cell::new(&format_large_number(stats.requests_succeeded)).fg(Color::Green),
-                Cell::new(&format_large_number(stats.requests_failed)).fg(
-                    if stats.requests_failed > 0 {
-                        Color::Red
-                    } else {
-                        Color::Green
-                    },
-                ),
-                Cell::new(&format!("{:.1}%", success_rate)).fg(color),
-                Cell::new(&format!("{:.1}ms", avg_latency)).fg(if avg_latency > 100.0 {
-                    Color::Yellow
-                } else {
-                    Color::Green
-                }),
+                Cell::new(method),
+                Cell::new(&format_large_number(stats.requests_sent)),
+                Cell::new(&format_large_number(stats.requests_succeeded)),
+                Cell::new(&format_large_number(stats.requests_failed)),
+                Cell::new(&format!("{:.1}%", success_rate)),
+                Cell::new(&format!("{:.1}ms", avg_latency)),
             ]);
         }
 
@@ -419,27 +401,15 @@ impl EthHttpCli {
         };
 
         table.add_row(vec![
-            Cell::new("TOTAL")
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format_large_number(total_sent))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format_large_number(total_succeeded))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format_large_number(total_failed))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format!("{:.1}%", overall_success_rate))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Blue),
-            Cell::new(&format!("{:.1}ms", overall_avg_latency))
-                .add_attribute(Attribute::Bold)
-                .fg(Color::Magenta),
+            Cell::new("TOTAL"),
+            Cell::new(&format_large_number(total_sent)),
+            Cell::new(&format_large_number(total_succeeded)),
+            Cell::new(&format_large_number(total_failed)),
+            Cell::new(&format!("{:.1}%", overall_success_rate)),
+            Cell::new(&format!("{:.1}ms", overall_avg_latency)),
         ]);
 
-        println!("{}", table);
+        info!("\n{}", table);
     }
 
     /// Reset metrics

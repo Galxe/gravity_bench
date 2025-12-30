@@ -16,7 +16,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
-use tracing::{error, info, Level};
+use tracing::{error, info};
+
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
@@ -257,12 +259,50 @@ async fn start_bench() -> Result<()> {
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_file(false)
-        .with_line_number(false)
-        .with_thread_ids(false)
-        .init();
+
+    // Initialize tracing
+    let log_path = benchmark_config.log_path.trim();
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let _guard = if log_path.is_empty() || log_path.eq_ignore_ascii_case("console") {
+        // Console only
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_file(false)
+            .with_line_number(false)
+            .with_thread_ids(false)
+            .init();
+        None
+    } else {
+        // File logging
+        let path = std::path::Path::new(log_path);
+        let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let file_stem = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("gravity_bench"));
+        let extension = path.extension().unwrap_or_else(|| std::ffi::OsStr::new("log"));
+        
+        // Ensure directory exists
+        std::fs::create_dir_all(directory).unwrap();
+
+        let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
+        let new_filename = format!("{}.{}.{}", file_stem.to_string_lossy(), timestamp, extension.to_string_lossy());
+        let full_path = directory.join(new_filename);
+
+        let file = std::fs::File::create(&full_path).unwrap();
+        let (non_blocking, guard) = tracing_appender::non_blocking(file);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+            )
+            .init();
+        
+        println!("Logging to file: {:?}", full_path);
+        Some(guard)
+    };
 
     let contract_config = if args.recover {
         info!("Starting in recovery mode...");
