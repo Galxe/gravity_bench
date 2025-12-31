@@ -162,9 +162,9 @@ impl EthHttpCli {
         self.chain_id
     }
 
-    pub async fn get_txn_count(&self, address: Address) -> Result<u64> {
+    pub async fn get_pending_txn_count(&self, address: Address) -> Result<u64> {
         tokio::time::timeout(Duration::from_secs(10), async {
-            let nonce = self.inner[0].get_transaction_count(address).await?;
+            let nonce = self.inner[0].get_transaction_count(address).pending().await?;
             Ok(nonce)
         })
         .await?
@@ -186,22 +186,6 @@ impl EthHttpCli {
             .await;
 
         result.with_context(|| "Failed to verify connection to Ethereum node")
-    }
-
-    /// Get account transaction count (nonce)
-    #[allow(unused)]
-    pub async fn get_transaction_count(&self, address: Address) -> Result<u64> {
-        let start = Instant::now();
-
-        let result = self
-            .retry_with_backoff(|| async { self.inner[0].get_transaction_count(address).await })
-            .await;
-
-        self.update_metrics("eth_getTransactionCount", result.is_ok(), start.elapsed())
-            .await;
-
-        result
-            .with_context(|| format!("Failed to get transaction count for address: {:?}", address))
     }
 
     /// Get account balance
@@ -496,10 +480,19 @@ impl EthHttpCli {
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
     }
 
-    pub async fn get_account(&self, address: Address) -> Result<Account> {
-        self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
-            .await
+    pub async fn get_latest_txn_count(&self, address: &Address) -> Result<u64> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let nonce = self.inner[0].get_transaction_count(*address).latest().await?;
+            Ok(nonce)
+        })
+        .await?
     }
+
+
+    // pub async fn get_account(&self, address: Address) -> Result<Account> {
+    //     self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
+    //         .await
+    // }
 
     /// Get full txpool content (WARNING: can be large, use sparingly)
     /// This is used for nonce correction when queued/pending ratio is too high

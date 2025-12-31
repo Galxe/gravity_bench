@@ -353,7 +353,7 @@ impl TxnTracker {
         impl std::future::Future<
             Output = (
                 PendingTxInfo,
-                Result<Account, anyhow::Error>,
+                Result<u64, anyhow::Error>,
                 Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
             ),
         >,
@@ -394,7 +394,7 @@ impl TxnTracker {
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
                     let account = client
-                        .get_account(*task_info.metadata.from_account.as_ref())
+                        .get_latest_txn_count(task_info.metadata.from_account.as_ref())
                         .await;
                     tracing::debug!(
                         "checked tx_hash={:?} result={:?}",
@@ -416,7 +416,7 @@ impl TxnTracker {
         &mut self,
         results: Vec<(
             PendingTxInfo,
-            Result<Account, anyhow::Error>,
+            Result<u64, anyhow::Error>,
             Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
         )>,
     ) -> Vec<RetryTxnInfo> {
@@ -425,7 +425,7 @@ impl TxnTracker {
         let mut retry_queue = Vec::new();
 
         // 1. Categorize results
-        for (info, account, result) in results {
+        for (info, account_nonce, result) in results {
             match result {
                 Ok(Some(receipt)) => {
                     // Transaction successfully confirmed
@@ -434,8 +434,8 @@ impl TxnTracker {
                 }
                 Ok(None) => {
                     // Transaction still pending
-                    if let Ok(account) = account {
-                        if account.nonce > info.metadata.nonce {
+                    if let Ok(account_nonce) = account_nonce {
+                        if account_nonce > info.metadata.nonce {
                             successful_txns.push((info, true));
                         }
                     } else {
