@@ -13,9 +13,10 @@ use crate::eth::EthHttpCli;
 use crate::txn_plan::PlanId;
 
 use super::txn_tracker::{BackpressureAction, PlanStatus, TxnTracker};
+use super::mempool_tracker::MempoolAction;
 use super::{
     PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer,
-    ReportProducerStats, RetryTxn, Tick, UpdateSubmissionResult,
+    ReportProducerStats, RetryTxn, Tick, UpdateSubmissionResult, CorrectNonces,
 };
 use crate::actors::{PauseProducer, ResumeProducer};
 
@@ -92,11 +93,36 @@ impl Actor for Monitor {
             ctx.spawn(
                 async move { MempoolTracker::get_pool_status(&client_clone).await }
                     .into_actor(act)
-                    .map(|res, act, _ctx| {
+                    .map(|res, act, ctx| {
                         if let Some(producer_addr) = &act.producer_addr {
                             match act.mempool_tracker.process_pool_status(res, producer_addr) {
-                                Ok((pending, queued)) => {
+                                Ok((pending, queued, action)) => {
                                     act.txn_tracker.update_mempool_stats(pending, queued);
+                                    
+                                    // Handle nonce correction if needed
+                                    if matches!(action, MempoolAction::NeedsNonceCorrection) {
+                                        let clients = act.clients.clone();
+                                        let producer = producer_addr.clone();
+                                        ctx.spawn(
+                                            async move {
+                                                // Get the first client to fetch txpool_content
+                                                if let Some(client) = clients.values().next() {
+                                                    match client.get_txpool_content().await {
+                                                        Ok(content) => {
+                                                            let corrections = MempoolTracker::extract_nonce_corrections(&content);
+                                                            if !corrections.is_empty() {
+                                                                producer.do_send(super::CorrectNonces { corrections });
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            error!("Failed to get txpool_content: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .into_actor(act),
+                                        );
+                                    }
                                 }
                                 Err(e) => {
                                     error!("Failed to process pool status: {}", e);

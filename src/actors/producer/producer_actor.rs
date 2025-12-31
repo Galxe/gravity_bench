@@ -9,7 +9,7 @@ use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
 use crate::actors::monitor::{
     Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, ReportProducerStats,
-    SubmissionResult, UpdateSubmissionResult,
+    SubmissionResult, UpdateSubmissionResult, CorrectNonces,
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
@@ -508,5 +508,43 @@ impl Handler<ResumeProducer> for Producer {
 
         // The producer is running again, so we attempt to trigger a plan if one is waiting.
         self.trigger_next_plan_if_needed(ctx);
+    }
+}
+
+/// Handler for correcting nonces based on txpool_content analysis
+impl Handler<CorrectNonces> for Producer {
+    type Result = ();
+
+    fn handle(&mut self, msg: CorrectNonces, _ctx: &mut Self::Context) {
+        tracing::info!(
+            "Received {} nonce corrections from txpool_content analysis",
+            msg.corrections.len()
+        );
+
+        for correction in msg.corrections {
+            // Find the account_id from the address
+            if let Some(account_id) = self.account_generator.find_account_id_by_address(&correction.account) {
+                tracing::debug!(
+                    "Correcting nonce for account {:?} to {}",
+                    correction.account,
+                    correction.expected_nonce
+                );
+                // Update nonce cache
+                self.nonce_cache.insert(account_id, correction.expected_nonce as u32);
+                // Unlock the account with the correct nonce
+                self.address_pool.unlock_correct_nonce(account_id, correction.expected_nonce as u32);
+            } else {
+                tracing::warn!(
+                    "Could not find account_id for address {:?}",
+                    correction.account
+                );
+            }
+        }
+
+        // Update ready accounts count
+        self.stats.ready_accounts.store(
+            self.address_pool.ready_len() as u64,
+            Ordering::Relaxed,
+        );
     }
 }

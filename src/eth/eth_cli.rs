@@ -63,6 +63,15 @@ where
     }
 }
 
+/// Response from txpool_content RPC call
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TxPoolContent {
+    #[serde(default)]
+    pub pending: HashMap<Address, HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub queued: HashMap<Address, HashMap<String, serde_json::Value>>,
+}
+
 /// Ethereum transaction sender, providing reliable communication with nodes
 #[derive(Clone)]
 pub struct EthHttpCli {
@@ -490,5 +499,25 @@ impl EthHttpCli {
     pub async fn get_account(&self, address: Address) -> Result<Account> {
         self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
             .await
+    }
+
+    /// Get full txpool content (WARNING: can be large, use sparingly)
+    /// This is used for nonce correction when queued/pending ratio is too high
+    pub async fn get_txpool_content(&self) -> Result<TxPoolContent> {
+        let start = Instant::now();
+
+        let result = self
+            .retry_with_backoff(|| async {
+                let result: TxPoolContent = self.inner[0]
+                    .raw_request::<(), TxPoolContent>("txpool_content".into(), ())
+                    .await?;
+                Ok(result)
+            })
+            .await;
+
+        self.update_metrics("txpool_content", result.is_ok(), start.elapsed())
+            .await;
+
+        result.with_context(|| "Failed to get txpool content")
     }
 }

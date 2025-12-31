@@ -89,4 +89,18 @@ pub struct RetryTxn {
     pub metadata: Arc<TxnMetadata>,
 }
 
+/// Information for correcting account nonce
+#[derive(Debug, Clone)]
+pub struct NonceCorrectionInfo {
+    pub account: Address,
+    pub expected_nonce: u64,
+}
+
+/// Message to correct nonces based on txpool_content analysis
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CorrectNonces {
+    pub corrections: Vec<NonceCorrectionInfo>,
+}
+
 pub use monitor_actor::Monitor;

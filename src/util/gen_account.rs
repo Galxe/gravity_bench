@@ -61,6 +61,7 @@ impl AccountSignerCache {
 pub struct AccountGenerator {
     accout_signers: AccountSignerCache,
     accout_addresses: Vec<Address>,
+    address_to_id: HashMap<Address, AccountId>,
     faucet_accout: PrivateKeySigner,
     faucet_accout_id: AccountId,
     init_nonces: Vec<Arc<AtomicU64>>,
@@ -73,6 +74,7 @@ impl AccountGenerator {
         Self {
             accout_signers: AccountSignerCache::new(CACHE_SIZE),
             accout_addresses: Vec::new(),
+            address_to_id: HashMap::new(),
             faucet_accout,
             faucet_accout_id: AccountId(u32::MAX),
             init_nonces: Vec::new(),
@@ -82,6 +84,7 @@ impl AccountGenerator {
     pub fn to_manager(mut self) -> AccountManager {
         self.accout_addresses.shrink_to_fit();
         self.init_nonces.shrink_to_fit();
+        self.address_to_id.shrink_to_fit();
         Arc::new(self)
     }
 
@@ -130,11 +133,13 @@ impl AccountGenerator {
             let res = self.gen_deterministic_accounts(begin_index, end_index);
             self.accout_addresses.reserve_exact(res.len());
             self.init_nonces.reserve(res.len());
-            self.accout_addresses
-                .extend(res.iter().map(|signer| signer.address()));
+            self.address_to_id.reserve(res.len());
             for (i, signer) in res.iter().enumerate() {
-                self.accout_signers
-                    .save_signer(signer.clone(), AccountId(i as u32));
+                let addr = signer.address();
+                let account_id = AccountId((begin_index + i as u64) as u32);
+                self.accout_addresses.push(addr);
+                self.address_to_id.insert(addr, account_id);
+                self.accout_signers.save_signer(signer.clone(), AccountId(i as u32));
             }
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
@@ -164,6 +169,17 @@ impl AccountGenerator {
             .collect::<Vec<_>>();
 
         accounts
+    }
+}
+
+impl AccountGenerator {
+    /// Find account ID by address using O(1) hashmap lookup
+    pub fn find_account_id_by_address(&self, address: &Address) -> Option<AccountId> {
+        // Check if it's the faucet account
+        if *address == self.faucet_accout.address() {
+            return Some(self.faucet_accout_id);
+        }
+        self.address_to_id.get(address).copied()
     }
 }
 
