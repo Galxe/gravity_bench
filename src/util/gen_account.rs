@@ -139,7 +139,7 @@ impl AccountGenerator {
                 let account_id = AccountId((begin_index + i as u64) as u32);
                 self.accout_addresses.push(addr);
                 self.address_to_id.insert(addr, account_id);
-                self.accout_signers.save_signer(signer.clone(), AccountId(i as u32));
+                self.accout_signers.save_signer(signer.clone(), account_id);
             }
             self.init_nonces
                 .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
