@@ -377,6 +377,7 @@ async fn start_bench() -> Result<()> {
     let monitor = Monitor::new_with_clients(
         eth_clients.clone(),
         benchmark_config.performance.max_pool_size,
+        benchmark_config.performance.sampling,
     )
     .start();
 

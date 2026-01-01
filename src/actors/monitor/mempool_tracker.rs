@@ -7,7 +7,7 @@ use crate::{
     eth::{EthHttpCli, MempoolStatus, TxPoolContent},
 };
 
-use super::NonceCorrectionInfo;
+
 
 /// Action to take after analyzing mempool status
 #[derive(Debug)]
@@ -75,10 +75,17 @@ impl MempoolTracker {
             action = MempoolAction::Resume;
         }
 
-        // Check for high queued ratio (indicates nonce gaps)
-        if total_pending > 0 {
-            let ratio = total_queued as f64 / total_pending as f64;
-            if ratio > self.queued_ratio_threshold {
+        // Check for high queued transactions (indicates nonce gaps)
+        if total_queued > 0 {
+            // Calculate ratio, handling division by zero if pending is 0
+            let ratio = if total_pending > 0 {
+                total_queued as f64 / total_pending as f64
+            } else {
+                f64::INFINITY
+            };
+
+            // Trigger if ratio is high OR if we have significant queued transactions with low pending
+            if ratio > self.queued_ratio_threshold || (total_queued > 100 && total_pending < 10) {
                 // Check cooldown
                 if self.last_correction_check.elapsed() > self.correction_cooldown {
                     self.last_correction_check = std::time::Instant::now();
@@ -96,34 +103,32 @@ impl MempoolTracker {
         Ok((total_pending as u64, total_queued as u64, action))
     }
 
-    /// Extract accounts with nonce gaps from txpool_content
-    /// For each account in queued, the minimum nonce is what they're waiting for
-    pub fn extract_nonce_corrections(content: &TxPoolContent) -> Vec<NonceCorrectionInfo> {
-        let mut corrections = Vec::new();
+    /// Identify accounts with nonce gaps from txpool_content
+    /// Returns list of addresses that need correction
+    pub fn identify_problematic_accounts(content: &TxPoolContent) -> Vec<alloy::primitives::Address> {
+        let mut problematic_accounts = Vec::new();
 
         for (address, nonces) in &content.queued {
-            // Find the minimum nonce in queued for this address
-            if let Some(min_nonce) = nonces.keys().filter_map(|s| s.parse::<u64>().ok()).min() {
-                // Check if this account has pending transactions
-                let has_pending = content.pending.contains_key(address);
-                
-                if !has_pending && min_nonce > 0 {
-                    // Account has queued txns but no pending, meaning nonce gap exists
-                    // The expected nonce should be min_nonce (the one they're waiting for)
-                    corrections.push(NonceCorrectionInfo {
-                        account: *address,
-                        expected_nonce: min_nonce,
-                    });
+            // Identify accounts that have queued transactions.
+            // Presence in 'queued' implies a gap or issue.
+            // We check if they also have pending transactions.
+            // If they have NO pending transactions but HAVE queued, strictly implies a gap.
+            let has_pending = content.pending.contains_key(address);
+            
+            // Check if there are any valid nonces in queued
+             if nonces.keys().any(|s| s.parse::<u64>().is_ok()) {
+                if !has_pending {
+                     problematic_accounts.push(*address);
                 }
             }
         }
 
         tracing::info!(
-            "Extracted {} nonce corrections from txpool_content",
-            corrections.len()
+            "Identified {} accounts with likely nonce gaps",
+            problematic_accounts.len()
         );
 
-        corrections
+        problematic_accounts
     }
 }
 

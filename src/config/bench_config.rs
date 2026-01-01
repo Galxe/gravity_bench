@@ -73,7 +73,40 @@ pub struct PerformanceConfig {
     pub max_pool_size: usize,
     /// Duration of the benchmark in seconds
     pub duration_secs: u64,
+    /// Sampling configuration: "full" or integer size (default: 10)
+    #[serde(default)]
+    pub sampling: SamplingPolicy,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SamplingPolicy {
+    Full(String),
+    Partial(usize),
+}
+
+impl Default for SamplingPolicy {
+    fn default() -> Self {
+        SamplingPolicy::Partial(10)
+    }
+}
+
+impl SamplingPolicy {
+    pub fn is_full(&self) -> bool {
+        match self {
+            SamplingPolicy::Full(s) => s.eq_ignore_ascii_case("full"),
+            _ => false,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            SamplingPolicy::Partial(n) => *n,
+            _ => 10, // Default fallback if needed, though is_full should be checked first
+        }
+    }
+}
+
 
 impl BenchConfig {
     /// Load configuration from TOML file

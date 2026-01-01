@@ -20,6 +20,8 @@ use super::{
 };
 use crate::actors::{PauseProducer, ResumeProducer};
 
+use crate::config::SamplingPolicy;
+
 #[derive(Message)]
 #[rtype(result = "()")]
 struct LogStats;
@@ -37,14 +39,16 @@ pub struct Monitor {
 }
 
 impl Monitor {
+
     pub fn new_with_clients(
         clients: Vec<std::sync::Arc<EthHttpCli>>,
         max_pool_size: usize,
+        sampling_policy: SamplingPolicy,
     ) -> Self {
         Self {
             producer_addr: None,
             consumer_addr: None,
-            txn_tracker: TxnTracker::new(clients.clone()),
+            txn_tracker: TxnTracker::new(clients.clone(), sampling_policy),
             mempool_tracker: MempoolTracker::new(max_pool_size),
             clients: Arc::new(
                 clients
@@ -109,9 +113,26 @@ impl Actor for Monitor {
                                                 if let Some(client) = clients.values().next() {
                                                     match client.get_txpool_content().await {
                                                         Ok(content) => {
-                                                            let corrections = MempoolTracker::extract_nonce_corrections(&content);
-                                                            if !corrections.is_empty() {
-                                                                producer.do_send(super::CorrectNonces { corrections });
+                                                            let accounts = MempoolTracker::identify_problematic_accounts(&content);
+                                                            if !accounts.is_empty() {
+                                                                let mut corrections = Vec::new();
+                                                                for account in accounts {
+                                                                    match client.get_pending_txn_count(account).await {
+                                                                        Ok(nonce) => {
+                                                                            corrections.push(super::NonceCorrectionInfo {
+                                                                                account,
+                                                                                expected_nonce: nonce,
+                                                                            });
+                                                                        }
+                                                                        Err(e) => {
+                                                                            error!("Failed to get nonce for account {:?}: {}", account, e);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                if !corrections.is_empty() {
+                                                                    info!("Sending {} nonce corrections to producer", corrections.len());
+                                                                    producer.do_send(CorrectNonces { corrections });
+                                                                }
                                                             }
                                                         }
                                                         Err(e) => {
@@ -173,7 +194,32 @@ impl Handler<UpdateSubmissionResult> for Monitor {
         if let Some(producer_addr) = &self.producer_addr {
             producer_addr.do_send(msg.clone());
         }
-        self.txn_tracker.handle_submission_result(&msg);
+
+        match msg.result.as_ref() {
+            crate::actors::monitor::SubmissionResult::ErrorWithRetry => {
+                // If the transaction failed submission, retry it endlessly to prevent nonce gaps
+                // and premature plan completion. Do NOT tell TxnTracker about the failure yet.
+                tracing::warn!(
+                    "Transaction failed submission (ErrorWithRetry). Retrying via Consumer. plan_id={}, tx_hash={:?}", 
+                    msg.metadata.plan_id,
+                    msg.metadata.txn_id
+                );
+                
+                if let Some(consumer) = &self.consumer_addr {
+                    consumer.do_send(RetryTxn {
+                        signed_bytes: msg.signed_bytes.clone(),
+                        metadata: msg.metadata.clone(),
+                    });
+                } else {
+                    tracing::error!("Cannot retry transaction, no consumer address: {:?}", msg.metadata.txn_id);
+                    // Fallback to tracker if no consumer (will mark as failed)
+                    self.txn_tracker.handle_submission_result(&msg);
+                }
+            }
+            _ => {
+                 self.txn_tracker.handle_submission_result(&msg);
+            }
+        }
     }
 }
 

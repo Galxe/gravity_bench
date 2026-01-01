@@ -1,5 +1,5 @@
 use alloy::{
-    consensus::{Account, TxEnvelope},
+    consensus::TxEnvelope,
     eips::Encodable2718,
     network::Ethereum,
     primitives::{Address, TxHash, U256},

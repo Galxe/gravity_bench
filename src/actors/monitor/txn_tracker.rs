@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use alloy::consensus::Account;
+
 use alloy::primitives::TxHash;
 use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use tracing::{debug, error, warn};
@@ -12,9 +12,11 @@ use crate::actors::monitor::SubmissionResult;
 use crate::eth::EthHttpCli;
 use crate::txn_plan::{PlanId, TxnMetadata};
 
+use crate::config::SamplingPolicy;
+
 use super::UpdateSubmissionResult;
 
-const SAMPLING_SIZE: usize = 10; // Define sampling size
+
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
 
@@ -64,6 +66,10 @@ pub struct TxnTracker {
     mempool_queued: u64,
     /// Track if producer was paused due to pending txn limit
     producer_paused_by_pending: bool,
+    /// Transactions currently being checked (to prevent overlapping checks)
+    inflight_checks: HashSet<TxHash>,
+    /// Sampling configuration
+    sampling_policy: SamplingPolicy,
 }
 
 /// Tracking status of a single transaction plan
@@ -150,7 +156,8 @@ pub struct RetryTxnInfo {
 
 impl TxnTracker {
     /// Create new transaction tracker
-    pub fn new(clients: Vec<Arc<EthHttpCli>>) -> Self {
+    /// Create new transaction tracker
+    pub fn new(clients: Vec<Arc<EthHttpCli>>, sampling_policy: SamplingPolicy) -> Self {
         let mut client_map = HashMap::new();
         for client in clients {
             let rpc_url = client.rpc().as_ref().clone();
@@ -174,6 +181,8 @@ impl TxnTracker {
             mempool_pending: 0,
             mempool_queued: 0,
             producer_paused_by_pending: false,
+            inflight_checks: HashSet::new(),
+            sampling_policy,
         }
     }
 
@@ -223,21 +232,32 @@ impl TxnTracker {
         }
     }
 
-    /// Register new plan (no changes)
+    /// Register new plan (or update existing one if retried)
     pub fn register_plan(&mut self, plan_id: PlanId, plan_name: String) {
-        debug!("Plan registered: plan_id={}", plan_id);
-        let tracker = PlanTracker {
-            produce_transactions: 0,
-            resolved_transactions: 0,
-            consumed_transactions: 0,
-            failed_submissions: 0,
-            failed_executions: 0,
+        if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
+            debug!(
+                "Plan already registered (likely retry): plan_id={}. Resetting flags.",
+                plan_id
+            );
+            // Result of retry logic: we are producing more transactions for this plan.
+            // Reset flags to keep plan open until the new attempt finishes.
+            tracker.plan_produced = false;
+            tracker.plan_failed_production = false;
+        } else {
+            debug!("Plan registered: plan_id={}", plan_id);
+            let tracker = PlanTracker {
+                produce_transactions: 0,
+                resolved_transactions: 0,
+                consumed_transactions: 0,
+                failed_submissions: 0,
+                failed_executions: 0,
 
-            plan_produced: false,
-            plan_failed_production: false,
-            plan_name,
-        };
-        self.plan_trackers.insert(plan_id, tracker);
+                plan_produced: false,
+                plan_failed_production: false,
+                plan_name,
+            };
+            self.plan_trackers.insert(plan_id, tracker);
+        }
     }
 
     pub fn mark_plan_failed(&mut self, plan_id: PlanId) {
@@ -253,7 +273,7 @@ impl TxnTracker {
     pub fn handle_submission_result(&mut self, msg: &UpdateSubmissionResult) {
         let plan_id = &msg.metadata.plan_id;
         if !self.plan_trackers.contains_key(plan_id) {
-            warn!("Plan not found: plan_id={}", plan_id);
+            warn!("Plan not found: plan_id={}, tx_hash={:?}, result={:?}", plan_id, msg.result, msg.result.as_ref());
             return;
         }
         let plan_tracker = self.plan_trackers.get_mut(plan_id).unwrap();
@@ -305,6 +325,7 @@ impl TxnTracker {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
                     self.total_failed_submissions += 1;
+                    warn!("Incrementing failed_submissions for plan {}: resolved={}, failed={}", plan_id, tracker.resolved_transactions, tracker.failed_submissions);
                     self.resolved_txn_timestamps.push_back(Instant::now());
                     self.total_resolved_transactions += 1;
                 }
@@ -336,6 +357,14 @@ impl TxnTracker {
         }
         if let PlanStatus::Completed = status {
             if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                warn!("Removing completed plan {}: produced={}, resolved={}, consumed={}, failed_sub={}, failed_exec={}", 
+                    plan_id, 
+                    completed_tracker.produce_transactions, 
+                    completed_tracker.resolved_transactions, 
+                    completed_tracker.consumed_transactions,
+                    completed_tracker.failed_submissions,
+                    completed_tracker.failed_executions
+                );
                 self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
             }
         }
@@ -367,23 +396,38 @@ impl TxnTracker {
         let mut tasks = Vec::new();
 
         // --- Core sampling logic ---
-        if total_pending <= SAMPLING_SIZE {
-            // If total is less than sampling size, check all
-            samples.extend(self.pending_txns.iter().cloned());
+        // Filter out transactions that are already being checked
+        let candidates: Vec<_> = self.pending_txns
+            .iter()
+            .filter(|info| !self.inflight_checks.contains(&info.tx_hash))
+            .cloned()
+            .collect();
+
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        if self.sampling_policy.is_full() || candidates.len() <= self.sampling_policy.size() {
+            // Check all candidates
+            samples.extend(candidates);
         } else {
-            // Select samples at fixed intervals in the queue
-            // For example, with 1000 txns and 10 samples, take one every 100
-            let step = total_pending / SAMPLING_SIZE;
-            for i in 0..SAMPLING_SIZE {
+            // Select samples at fixed intervals from candidates
+            let total_candidates = candidates.len();
+            let step = total_candidates / self.sampling_policy.size();
+            for i in 0..self.sampling_policy.size() {
                 let index = i * step;
-                if let Some(txn_info) = self.pending_txns.iter().nth(index) {
+                if let Some(txn_info) = candidates.get(index) {
                     samples.insert(txn_info.clone());
                 }
             }
-            // Always include the oldest one as it's most critical
-            if let Some(oldest) = self.pending_txns.iter().next() {
+            // Always include the oldest one
+            if let Some(oldest) = candidates.first() {
                 samples.insert(oldest.clone());
             }
+        }
+
+        for pending_info in &samples {
+            self.inflight_checks.insert(pending_info.tx_hash);
         }
 
         for pending_info in samples {
@@ -426,6 +470,9 @@ impl TxnTracker {
 
         // 1. Categorize results
         for (info, account_nonce, result) in results {
+            // Always remove from inflight_checks as we have a result (or error)
+            self.inflight_checks.remove(&info.tx_hash);
+
             match result {
                 Ok(Some(receipt)) => {
                     // Transaction successfully confirmed
@@ -466,7 +513,8 @@ impl TxnTracker {
             .collect::<HashSet<_>>();
 
         // 2. If there are successful transactions, calculate median time and clean up
-        if !successful_txns.is_empty() {
+        // Only use heuristic batch cleaning in Partial mode. In Full mode, we track every txn explicitly.
+        if !self.sampling_policy.is_full() && !successful_txns.is_empty() {
             // Create a temporary TxnInfo for BTreeSet split_off
             // TxHash is not important as sorting is mainly based on time
             let split_info = successful_txns[successful_txns.len() - 1].0.clone();
@@ -553,6 +601,9 @@ impl TxnTracker {
             }
 
             for info in to_process {
+                // Also remove from inflight checks if we are retrying them (removing from pending)
+                // This covers cases where we retry transactions that might be currently inflight
+                self.inflight_checks.remove(&info.tx_hash);
                 self.pending_txns.remove(&info);
 
                 if info.submit_time.elapsed() > TXN_TIMEOUT {
@@ -584,6 +635,7 @@ impl TxnTracker {
                         "Transaction completely timed out: plan_id={}, tx_hash={:?}",
                         info.metadata.plan_id, info.tx_hash
                     );
+                    self.inflight_checks.remove(&info.tx_hash); // Clean up inflight if removing
                     self.pending_txns.remove(&info);
                     if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
                         plan_tracker.resolved_transactions += 1;
