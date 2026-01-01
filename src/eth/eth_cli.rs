@@ -4,7 +4,8 @@ use alloy::{
     network::Ethereum,
     primitives::{Address, TxHash, U256},
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::TransactionReceipt,
+    rpc::{client::RpcClient, types::TransactionReceipt},
+    transports::http::Http,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use comfy_table::{presets::UTF8_FULL, Cell, Table};
@@ -120,25 +121,20 @@ impl EthHttpCli {
             Url::parse(rpc_url).with_context(|| format!("Failed to parse RPC URL: {}", rpc_url))?;
         let mut inner = Vec::new();
         for _ in 0..1 {
-            // let client = reqwest::Client::builder()
-            //     // .pool_idle_timeout(Duration::from_secs(120))
-            //     // .pool_max_idle_per_host(2000)
-            //     // .connect_timeout(Duration::from_secs(10))
-            //     // .timeout(Duration::from_secs(5))
-            //     // .tcp_keepalive(Duration::from_secs(30))
-            //     // .tcp_nodelay(true)
-            //     // .http2_prior_knowledge()
-            //     // .http2_adaptive_window(true)
-            //     // .http2_keep_alive_timeout(Duration::from_secs(10))
-            //     // .no_gzip()
-            //     // .no_brotli()
-            //     // .no_deflate()
-            //     // .no_zstd()
-            //     .build()
-            //     .unwrap();
+            let client = reqwest::Client::builder()
+                .pool_idle_timeout(Duration::from_secs(10)) // Shorter idle, high TPS rarely idles
+                .pool_max_idle_per_host(2000) // Large pool for 1500 concurrent senders
+                .connect_timeout(Duration::from_secs(5)) // Fast fail on connection issues
+                .timeout(Duration::from_secs(60)) // Reasonable global timeout to prevent stuck requests
+                .tcp_keepalive(Duration::from_secs(30))
+                .tcp_nodelay(true) // Disable Nagle's algorithm for low latency
+                .http2_prior_knowledge() // Use HTTP/2 if server supports, better multiplexing
+                .build()
+                .unwrap();
 
-            let provider: RootProvider<Ethereum> =
-                ProviderBuilder::default().connect_http(url.clone());
+            let http = Http::with_client(client, url.clone());
+            let rpc_client = RpcClient::new(http, true);
+            let provider: RootProvider<Ethereum> = ProviderBuilder::default().connect_client(rpc_client);
 
             inner.push(Arc::new(provider));
         }
