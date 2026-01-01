@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use super::TxnIter;
 
-const DEFAULT_CONCURRENCY_LIMIT: usize = 256;
+const DEFAULT_CONCURRENCY_LIMIT: usize = 64;
 
 pub struct LevelFaucetPlan<T: FaucetTxnBuilder> {
     id: PlanId,
