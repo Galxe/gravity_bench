@@ -91,6 +91,9 @@ struct PlanTracker {
     plan_failed_production: bool,
 
     plan_name: String,
+    
+    /// Set of transaction hashes that have been resolved to avoid double counting
+    resolved_hashes: HashSet<TxHash>,
 }
 
 /// Detailed information of in-flight transactions
@@ -226,9 +229,14 @@ impl TxnTracker {
         }
     }
 
-    pub fn handle_plan_produced(&mut self, plan_id: PlanId, _count: usize) {
+    pub fn handle_plan_produced(&mut self, plan_id: PlanId, count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.plan_produced = true;
+            // Force sync produced transactions count to catch up any lagging messages
+            if tracker.produce_transactions != count {
+                 warn!("PlanProduced sync: plan {} count adjusted from {} to source-of-truth {}", plan_id, tracker.produce_transactions, count);
+                 tracker.produce_transactions = count; 
+            }
         }
     }
 
@@ -255,6 +263,7 @@ impl TxnTracker {
                 plan_produced: false,
                 plan_failed_production: false,
                 plan_name,
+                resolved_hashes: HashSet::new(),
             };
             self.plan_trackers.insert(plan_id, tracker);
         }
@@ -538,9 +547,11 @@ impl TxnTracker {
                 if let Some(plan_tracker) =
                     self.plan_trackers.get_mut(&cleared_info.metadata.plan_id)
                 {
-                    plan_tracker.resolved_transactions += 1;
-                    self.resolved_txn_timestamps.push_back(Instant::now());
-                    self.total_resolved_transactions += 1;
+                    if plan_tracker.resolved_hashes.insert(cleared_info.tx_hash) {
+                        plan_tracker.resolved_transactions += 1;
+                        self.resolved_txn_timestamps.push_back(Instant::now());
+                        self.total_resolved_transactions += 1;
+                    }
                 }
             }
 
@@ -557,16 +568,20 @@ impl TxnTracker {
             }
 
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                plan_tracker.resolved_transactions += 1;
-                self.resolved_txn_timestamps.push_back(Instant::now());
-                self.total_resolved_transactions += 1;
-                if !receipt_status {
-                    plan_tracker.failed_executions += 1;
-                    self.total_failed_executions += 1;
-                    warn!(
-                        "Transaction reverted: plan_id={}, tx_hash={:?}",
-                        info.metadata.plan_id, info.tx_hash
-                    );
+                if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                    plan_tracker.resolved_transactions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
+                    if !receipt_status {
+                        plan_tracker.failed_executions += 1;
+                        self.total_failed_executions += 1;
+                        warn!(
+                            "Transaction reverted: plan_id={}, tx_hash={:?}",
+                            info.metadata.plan_id, info.tx_hash
+                        );
+                    }
+                } else {
+                    debug!("Duplicate resolution skipped: plan_id={}, tx_hash={:?}", info.metadata.plan_id, info.tx_hash);
                 }
             }
         }
@@ -613,11 +628,13 @@ impl TxnTracker {
                         info.metadata.plan_id, info.tx_hash
                     );
                     if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                        plan_tracker.resolved_transactions += 1;
-                        plan_tracker.failed_executions += 1;
-                        self.total_failed_executions += 1;
-                        self.resolved_txn_timestamps.push_back(Instant::now());
-                        self.total_resolved_transactions += 1;
+                        if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                            plan_tracker.resolved_transactions += 1;
+                            plan_tracker.failed_executions += 1;
+                            self.total_failed_executions += 1;
+                            self.resolved_txn_timestamps.push_back(Instant::now());
+                            self.total_resolved_transactions += 1;
+                        }
                     }
                 } else {
                     // Queue for retry (and remove from pending to avoid duplicate retry)
@@ -638,11 +655,13 @@ impl TxnTracker {
                     self.inflight_checks.remove(&info.tx_hash); // Clean up inflight if removing
                     self.pending_txns.remove(&info);
                     if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                        plan_tracker.resolved_transactions += 1;
-                        plan_tracker.failed_executions += 1;
-                        self.total_failed_executions += 1;
-                        self.resolved_txn_timestamps.push_back(Instant::now());
-                        self.total_resolved_transactions += 1;
+                        if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                            plan_tracker.resolved_transactions += 1;
+                            plan_tracker.failed_executions += 1;
+                            self.total_failed_executions += 1;
+                            self.resolved_txn_timestamps.push_back(Instant::now());
+                            self.total_resolved_transactions += 1;
+                        }
                     }
                 }
                 // If not timed out, they stay in pending_txns (already there from earlier)
