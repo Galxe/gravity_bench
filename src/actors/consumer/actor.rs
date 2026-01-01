@@ -283,6 +283,36 @@ impl Consumer {
                         return;
                     }
 
+                    // --- Handle permanent errors that should NOT be retried ---
+                    // These errors will never succeed no matter how many times we retry
+                    if error_string.contains("insufficient funds")
+                        || error_string.contains("insufficient balance")
+                        || error_string.contains("gas limit exceeded")
+                        || error_string.contains("exceeds block gas limit")
+                        || error_string.contains("intrinsic gas too low")
+                    {
+                        error!(
+                            "Permanent error for txn {:?}: {}, marking as failed (no retry)",
+                            metadata.txn_id, e
+                        );
+                        // Treat as NonceTooLow with placeholder values - this will mark as resolved
+                        // without infinite retry. The transaction is dropped.
+                        monitor_addr.do_send(UpdateSubmissionResult {
+                            metadata,
+                            result: Arc::new(SubmissionResult::NonceTooLow {
+                                tx_hash: keccak256(&signed_txn.bytes),
+                                expect_nonce: 0, // placeholder
+                                actual_nonce: 0, // placeholder
+                                from_account: Arc::new(alloy::primitives::Address::ZERO),
+                            }),
+                            rpc_url: url,
+                            send_time: Instant::now(),
+                            signed_bytes: Arc::new(signed_txn.bytes.clone()),
+                        });
+                        transactions_sending.fetch_sub(1, Ordering::Relaxed);
+                        return;
+                    }
+
                     // --- Requirement 2: If it's a Nonce related error ---
                     // "nonce too low" or "invalid nonce" suggests the on-chain nonce may have advanced
                     if error_string.contains("nonce too low")
