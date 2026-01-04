@@ -124,11 +124,8 @@ impl EthHttpCli {
             let client = reqwest::Client::builder()
                 .pool_idle_timeout(Duration::from_secs(10)) // Shorter idle, high TPS rarely idles
                 .pool_max_idle_per_host(2000) // Large pool for 1500 concurrent senders
-                .connect_timeout(Duration::from_secs(5)) // Fast fail on connection issues
-                .timeout(Duration::from_secs(60)) // Reasonable global timeout to prevent stuck requests
                 .tcp_keepalive(Duration::from_secs(30))
                 .tcp_nodelay(true) // Disable Nagle's algorithm for low latency
-                .http2_prior_knowledge() // Use HTTP/2 if server supports, better multiplexing
                 .build()
                 .unwrap();
 
