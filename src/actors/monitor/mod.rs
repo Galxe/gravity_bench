@@ -71,6 +71,7 @@ pub struct PlanCompleted {
     pub plan_id: PlanId,
 }
 
+
 #[derive(Message)]
 #[rtype(result = "()")]
 pub struct PlanFailed {
@@ -78,12 +79,28 @@ pub struct PlanFailed {
     pub reason: String,
 }
 
+
+
 /// Message to retry a timed-out transaction
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct RetryTxn {
     pub signed_bytes: Arc<Vec<u8>>,
     pub metadata: Arc<TxnMetadata>,
+}
+
+/// Information for correcting account nonce
+#[derive(Debug, Clone)]
+pub struct NonceCorrectionInfo {
+    pub account: Address,
+    pub expected_nonce: u64,
+}
+
+/// Message to correct nonces based on txpool_content analysis
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct CorrectNonces {
+    pub corrections: Vec<NonceCorrectionInfo>,
 }
 
 pub use monitor_actor::Monitor;

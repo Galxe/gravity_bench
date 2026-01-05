@@ -250,7 +250,7 @@ async fn get_init_nonce_map(
     let faucet_address = faucet_signer.address();
     init_nonce_map.insert(
         faucet_address,
-        eth_client.get_txn_count(faucet_address).await.unwrap(),
+        eth_client.get_pending_txn_count(faucet_address).await.unwrap(),
     );
     Arc::new(init_nonce_map)
 }
@@ -377,6 +377,7 @@ async fn start_bench() -> Result<()> {
     let monitor = Monitor::new_with_clients(
         eth_clients.clone(),
         benchmark_config.performance.max_pool_size,
+        benchmark_config.performance.sampling,
     )
     .start();
 
@@ -535,7 +536,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
                 for _ in 0..5 {
                     let res = tokio::time::timeout(
                         std::time::Duration::from_secs(10),
-                        client.get_txn_count(addr),
+                        client.get_pending_txn_count(addr),
                     )
                     .await;
                     if res.is_ok() {

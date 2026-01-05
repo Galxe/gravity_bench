@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use alloy::consensus::Account;
+
 use alloy::primitives::TxHash;
 use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use tracing::{debug, error, warn};
@@ -12,9 +12,11 @@ use crate::actors::monitor::SubmissionResult;
 use crate::eth::EthHttpCli;
 use crate::txn_plan::{PlanId, TxnMetadata};
 
+use crate::config::SamplingPolicy;
+
 use super::UpdateSubmissionResult;
 
-const SAMPLING_SIZE: usize = 10; // Define sampling size
+
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
 
@@ -56,6 +58,7 @@ pub struct TxnTracker {
     total_resolved_transactions: u64,
     total_failed_submissions: u64,
     total_failed_executions: u64,
+    total_failed_production_plans: u64,
     last_completed_plan: Option<(PlanId, PlanTracker)>,
     producer_ready_accounts: u64,
     producer_sending_txns: u64,
@@ -63,6 +66,10 @@ pub struct TxnTracker {
     mempool_queued: u64,
     /// Track if producer was paused due to pending txn limit
     producer_paused_by_pending: bool,
+    /// Transactions currently being checked (to prevent overlapping checks)
+    inflight_checks: HashSet<TxHash>,
+    /// Sampling configuration
+    sampling_policy: SamplingPolicy,
 }
 
 /// Tracking status of a single transaction plan
@@ -80,8 +87,13 @@ struct PlanTracker {
     failed_executions: u64,
 
     plan_produced: bool,
+    /// Indicates if the plan failed during production (e.g. consumer error)
+    plan_failed_production: bool,
 
     plan_name: String,
+    
+    /// Set of transaction hashes that have been resolved to avoid double counting
+    resolved_hashes: HashSet<TxHash>,
 }
 
 /// Detailed information of in-flight transactions
@@ -147,7 +159,8 @@ pub struct RetryTxnInfo {
 
 impl TxnTracker {
     /// Create new transaction tracker
-    pub fn new(clients: Vec<Arc<EthHttpCli>>) -> Self {
+    /// Create new transaction tracker
+    pub fn new(clients: Vec<Arc<EthHttpCli>>, sampling_policy: SamplingPolicy) -> Self {
         let mut client_map = HashMap::new();
         for client in clients {
             let rpc_url = client.rpc().as_ref().clone();
@@ -164,12 +177,15 @@ impl TxnTracker {
             total_resolved_transactions: 0,
             total_failed_submissions: 0,
             total_failed_executions: 0,
+            total_failed_production_plans: 0,
             last_completed_plan: None,
             producer_ready_accounts: 0,
             producer_sending_txns: 0,
             mempool_pending: 0,
             mempool_queued: 0,
             producer_paused_by_pending: false,
+            inflight_checks: HashSet::new(),
+            sampling_policy,
         }
     }
 
@@ -213,32 +229,60 @@ impl TxnTracker {
         }
     }
 
-    pub fn handle_plan_produced(&mut self, plan_id: PlanId, _count: usize) {
+    pub fn handle_plan_produced(&mut self, plan_id: PlanId, count: usize) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
             tracker.plan_produced = true;
+            // Force sync produced transactions count to catch up any lagging messages
+            if tracker.produce_transactions != count {
+                 warn!("PlanProduced sync: plan {} count adjusted from {} to source-of-truth {}", plan_id, tracker.produce_transactions, count);
+                 tracker.produce_transactions = count; 
+            }
         }
     }
 
-    /// Register new plan (no changes)
+    /// Register new plan (or update existing one if retried)
     pub fn register_plan(&mut self, plan_id: PlanId, plan_name: String) {
-        debug!("Plan registered: plan_id={}", plan_id);
-        let tracker = PlanTracker {
-            produce_transactions: 0,
-            resolved_transactions: 0,
-            consumed_transactions: 0,
-            failed_submissions: 0,
-            failed_executions: 0,
-            plan_produced: false,
-            plan_name,
-        };
-        self.plan_trackers.insert(plan_id, tracker);
+        if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
+            debug!(
+                "Plan already registered (likely retry): plan_id={}. Resetting flags.",
+                plan_id
+            );
+            // Result of retry logic: we are producing more transactions for this plan.
+            // Reset flags to keep plan open until the new attempt finishes.
+            tracker.plan_produced = false;
+            tracker.plan_failed_production = false;
+        } else {
+            debug!("Plan registered: plan_id={}", plan_id);
+            let tracker = PlanTracker {
+                produce_transactions: 0,
+                resolved_transactions: 0,
+                consumed_transactions: 0,
+                failed_submissions: 0,
+                failed_executions: 0,
+
+                plan_produced: false,
+                plan_failed_production: false,
+                plan_name,
+                resolved_hashes: HashSet::new(),
+            };
+            self.plan_trackers.insert(plan_id, tracker);
+        }
+    }
+
+    pub fn mark_plan_failed(&mut self, plan_id: PlanId) {
+        if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
+            tracker.plan_failed_production = true;
+            // Also mark as produced so it doesn't count as "Not Produced" (pending)
+            tracker.plan_produced = true;
+            self.total_failed_production_plans += 1;
+        }
     }
 
     /// Handle transaction submission result
     pub fn handle_submission_result(&mut self, msg: &UpdateSubmissionResult) {
         let plan_id = &msg.metadata.plan_id;
         if !self.plan_trackers.contains_key(plan_id) {
-            warn!("Plan not found: plan_id={}", plan_id);
+            warn!("Plan not found: plan_id={}, tx_hash={:?}, result={:?}", plan_id, msg.result, msg.result.as_ref());
             return;
         }
         let plan_tracker = self.plan_trackers.get_mut(plan_id).unwrap();
@@ -290,6 +334,7 @@ impl TxnTracker {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
                     self.total_failed_submissions += 1;
+                    warn!("Incrementing failed_submissions for plan {}: resolved={}, failed={}", plan_id, tracker.resolved_transactions, tracker.failed_submissions);
                     self.resolved_txn_timestamps.push_back(Instant::now());
                     self.total_resolved_transactions += 1;
                 }
@@ -321,6 +366,14 @@ impl TxnTracker {
         }
         if let PlanStatus::Completed = status {
             if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
+                warn!("Removing completed plan {}: produced={}, resolved={}, consumed={}, failed_sub={}, failed_exec={}", 
+                    plan_id, 
+                    completed_tracker.produce_transactions, 
+                    completed_tracker.resolved_transactions, 
+                    completed_tracker.consumed_transactions,
+                    completed_tracker.failed_submissions,
+                    completed_tracker.failed_executions
+                );
                 self.last_completed_plan = Some((plan_id.clone(), completed_tracker));
             }
         }
@@ -338,7 +391,7 @@ impl TxnTracker {
         impl std::future::Future<
             Output = (
                 PendingTxInfo,
-                Result<Account, anyhow::Error>,
+                Result<u64, anyhow::Error>,
                 Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
             ),
         >,
@@ -352,23 +405,38 @@ impl TxnTracker {
         let mut tasks = Vec::new();
 
         // --- Core sampling logic ---
-        if total_pending <= SAMPLING_SIZE {
-            // If total is less than sampling size, check all
-            samples.extend(self.pending_txns.iter().cloned());
+        // Filter out transactions that are already being checked
+        let candidates: Vec<_> = self.pending_txns
+            .iter()
+            .filter(|info| !self.inflight_checks.contains(&info.tx_hash))
+            .cloned()
+            .collect();
+
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        if self.sampling_policy.is_full() || candidates.len() <= self.sampling_policy.size() {
+            // Check all candidates
+            samples.extend(candidates);
         } else {
-            // Select samples at fixed intervals in the queue
-            // For example, with 1000 txns and 10 samples, take one every 100
-            let step = total_pending / SAMPLING_SIZE;
-            for i in 0..SAMPLING_SIZE {
+            // Select samples at fixed intervals from candidates
+            let total_candidates = candidates.len();
+            let step = total_candidates / self.sampling_policy.size();
+            for i in 0..self.sampling_policy.size() {
                 let index = i * step;
-                if let Some(txn_info) = self.pending_txns.iter().nth(index) {
+                if let Some(txn_info) = candidates.get(index) {
                     samples.insert(txn_info.clone());
                 }
             }
-            // Always include the oldest one as it's most critical
-            if let Some(oldest) = self.pending_txns.iter().next() {
+            // Always include the oldest one
+            if let Some(oldest) = candidates.first() {
                 samples.insert(oldest.clone());
             }
+        }
+
+        for pending_info in &samples {
+            self.inflight_checks.insert(pending_info.tx_hash);
         }
 
         for pending_info in samples {
@@ -379,7 +447,7 @@ impl TxnTracker {
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
                     let account = client
-                        .get_account(*task_info.metadata.from_account.as_ref())
+                        .get_latest_txn_count(task_info.metadata.from_account.as_ref())
                         .await;
                     tracing::debug!(
                         "checked tx_hash={:?} result={:?}",
@@ -401,7 +469,7 @@ impl TxnTracker {
         &mut self,
         results: Vec<(
             PendingTxInfo,
-            Result<Account, anyhow::Error>,
+            Result<u64, anyhow::Error>,
             Result<Option<alloy::rpc::types::TransactionReceipt>, anyhow::Error>,
         )>,
     ) -> Vec<RetryTxnInfo> {
@@ -410,7 +478,10 @@ impl TxnTracker {
         let mut retry_queue = Vec::new();
 
         // 1. Categorize results
-        for (info, account, result) in results {
+        for (info, account_nonce, result) in results {
+            // Always remove from inflight_checks as we have a result (or error)
+            self.inflight_checks.remove(&info.tx_hash);
+
             match result {
                 Ok(Some(receipt)) => {
                     // Transaction successfully confirmed
@@ -419,8 +490,8 @@ impl TxnTracker {
                 }
                 Ok(None) => {
                     // Transaction still pending
-                    if let Ok(account) = account {
-                        if account.nonce > info.metadata.nonce {
+                    if let Ok(account_nonce) = account_nonce {
+                        if account_nonce > info.metadata.nonce {
                             successful_txns.push((info, true));
                         }
                     } else {
@@ -451,7 +522,8 @@ impl TxnTracker {
             .collect::<HashSet<_>>();
 
         // 2. If there are successful transactions, calculate median time and clean up
-        if !successful_txns.is_empty() {
+        // Only use heuristic batch cleaning in Partial mode. In Full mode, we track every txn explicitly.
+        if !self.sampling_policy.is_full() && !successful_txns.is_empty() {
             // Create a temporary TxnInfo for BTreeSet split_off
             // TxHash is not important as sorting is mainly based on time
             let split_info = successful_txns[successful_txns.len() - 1].0.clone();
@@ -475,9 +547,11 @@ impl TxnTracker {
                 if let Some(plan_tracker) =
                     self.plan_trackers.get_mut(&cleared_info.metadata.plan_id)
                 {
-                    plan_tracker.resolved_transactions += 1;
-                    self.resolved_txn_timestamps.push_back(Instant::now());
-                    self.total_resolved_transactions += 1;
+                    if plan_tracker.resolved_hashes.insert(cleared_info.tx_hash) {
+                        plan_tracker.resolved_transactions += 1;
+                        self.resolved_txn_timestamps.push_back(Instant::now());
+                        self.total_resolved_transactions += 1;
+                    }
                 }
             }
 
@@ -494,16 +568,20 @@ impl TxnTracker {
             }
 
             if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                plan_tracker.resolved_transactions += 1;
-                self.resolved_txn_timestamps.push_back(Instant::now());
-                self.total_resolved_transactions += 1;
-                if !receipt_status {
-                    plan_tracker.failed_executions += 1;
-                    self.total_failed_executions += 1;
-                    warn!(
-                        "Transaction reverted: plan_id={}, tx_hash={:?}",
-                        info.metadata.plan_id, info.tx_hash
-                    );
+                if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                    plan_tracker.resolved_transactions += 1;
+                    self.resolved_txn_timestamps.push_back(Instant::now());
+                    self.total_resolved_transactions += 1;
+                    if !receipt_status {
+                        plan_tracker.failed_executions += 1;
+                        self.total_failed_executions += 1;
+                        warn!(
+                            "Transaction reverted: plan_id={}, tx_hash={:?}",
+                            info.metadata.plan_id, info.tx_hash
+                        );
+                    }
+                } else {
+                    debug!("Duplicate resolution skipped: plan_id={}, tx_hash={:?}", info.metadata.plan_id, info.tx_hash);
                 }
             }
         }
@@ -538,6 +616,9 @@ impl TxnTracker {
             }
 
             for info in to_process {
+                // Also remove from inflight checks if we are retrying them (removing from pending)
+                // This covers cases where we retry transactions that might be currently inflight
+                self.inflight_checks.remove(&info.tx_hash);
                 self.pending_txns.remove(&info);
 
                 if info.submit_time.elapsed() > TXN_TIMEOUT {
@@ -547,11 +628,13 @@ impl TxnTracker {
                         info.metadata.plan_id, info.tx_hash
                     );
                     if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                        plan_tracker.resolved_transactions += 1;
-                        plan_tracker.failed_executions += 1;
-                        self.total_failed_executions += 1;
-                        self.resolved_txn_timestamps.push_back(Instant::now());
-                        self.total_resolved_transactions += 1;
+                        if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                            plan_tracker.resolved_transactions += 1;
+                            plan_tracker.failed_executions += 1;
+                            self.total_failed_executions += 1;
+                            self.resolved_txn_timestamps.push_back(Instant::now());
+                            self.total_resolved_transactions += 1;
+                        }
                     }
                 } else {
                     // Queue for retry (and remove from pending to avoid duplicate retry)
@@ -569,13 +652,16 @@ impl TxnTracker {
                         "Transaction completely timed out: plan_id={}, tx_hash={:?}",
                         info.metadata.plan_id, info.tx_hash
                     );
+                    self.inflight_checks.remove(&info.tx_hash); // Clean up inflight if removing
                     self.pending_txns.remove(&info);
                     if let Some(plan_tracker) = self.plan_trackers.get_mut(&info.metadata.plan_id) {
-                        plan_tracker.resolved_transactions += 1;
-                        plan_tracker.failed_executions += 1;
-                        self.total_failed_executions += 1;
-                        self.resolved_txn_timestamps.push_back(Instant::now());
-                        self.total_resolved_transactions += 1;
+                        if plan_tracker.resolved_hashes.insert(info.tx_hash) {
+                            plan_tracker.resolved_transactions += 1;
+                            plan_tracker.failed_executions += 1;
+                            self.total_failed_executions += 1;
+                            self.resolved_txn_timestamps.push_back(Instant::now());
+                            self.total_resolved_transactions += 1;
+                        }
                     }
                 }
                 // If not timed out, they stay in pending_txns (already there from earlier)
@@ -631,7 +717,17 @@ impl TxnTracker {
         let mut timed_out_txns = 0u64;
 
         for (_plan_id, tracker) in &self.plan_trackers {
-            if tracker.plan_produced {
+            if tracker.plan_failed_production {
+                // Counted separately or as completed failed? 
+                // Let's count it as completed (failed) for the "Completed Plans" metric if we consider it "Done"
+                // But for clarity, let's keep it separate or part of "Not Produced" logic? 
+                // The requirement is to explain "Not Produced". 
+                // If we set plan_produced=true in mark_plan_failed, it lands here.
+                
+                // If failed production, it contributes to "Prod Failures" but we should decide if it's "Completed".
+                // Since it will never produce more txns, it is effectively completed (failed).
+                completed_plans += 1;
+            } else if tracker.plan_produced {
                 produced_plans += 1;
                 if tracker.resolved_transactions as usize >= tracker.produce_transactions {
                     completed_plans += 1;
@@ -696,7 +792,7 @@ impl TxnTracker {
             Cell::new("Produced Plans"),
             Cell::new(&format_large_number(produced_plans)),
             Cell::new("Not Produced"),
-            Cell::new(&format_large_number(not_produced_plans)),
+            Cell::new(&format!("{}/{}F", format_large_number(not_produced_plans), format_large_number(self.total_failed_production_plans))),
         ]);
 
         // Row 5: Completed plans and in progress plans

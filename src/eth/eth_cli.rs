@@ -1,10 +1,11 @@
 use alloy::{
-    consensus::{Account, TxEnvelope},
+    consensus::TxEnvelope,
     eips::Encodable2718,
     network::Ethereum,
     primitives::{Address, TxHash, U256},
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::TransactionReceipt,
+    rpc::{client::RpcClient, types::TransactionReceipt},
+    transports::http::Http,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use comfy_table::{presets::UTF8_FULL, Cell, Table};
@@ -63,6 +64,15 @@ where
     }
 }
 
+/// Response from txpool_content RPC call
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TxPoolContent {
+    #[serde(default)]
+    pub pending: HashMap<Address, HashMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub queued: HashMap<Address, HashMap<String, serde_json::Value>>,
+}
+
 /// Ethereum transaction sender, providing reliable communication with nodes
 #[derive(Clone)]
 pub struct EthHttpCli {
@@ -111,25 +121,17 @@ impl EthHttpCli {
             Url::parse(rpc_url).with_context(|| format!("Failed to parse RPC URL: {}", rpc_url))?;
         let mut inner = Vec::new();
         for _ in 0..1 {
-            // let client = reqwest::Client::builder()
-            //     // .pool_idle_timeout(Duration::from_secs(120))
-            //     // .pool_max_idle_per_host(2000)
-            //     // .connect_timeout(Duration::from_secs(10))
-            //     // .timeout(Duration::from_secs(5))
-            //     // .tcp_keepalive(Duration::from_secs(30))
-            //     // .tcp_nodelay(true)
-            //     // .http2_prior_knowledge()
-            //     // .http2_adaptive_window(true)
-            //     // .http2_keep_alive_timeout(Duration::from_secs(10))
-            //     // .no_gzip()
-            //     // .no_brotli()
-            //     // .no_deflate()
-            //     // .no_zstd()
-            //     .build()
-            //     .unwrap();
+            let client = reqwest::Client::builder()
+                .pool_idle_timeout(Duration::from_secs(10)) // Shorter idle, high TPS rarely idles
+                .pool_max_idle_per_host(2000) // Large pool for 1500 concurrent senders
+                .tcp_keepalive(Duration::from_secs(30))
+                .tcp_nodelay(true) // Disable Nagle's algorithm for low latency
+                .build()
+                .unwrap();
 
-            let provider: RootProvider<Ethereum> =
-                ProviderBuilder::default().connect_http(url.clone());
+            let http = Http::with_client(client, url.clone());
+            let rpc_client = RpcClient::new(http, true);
+            let provider: RootProvider<Ethereum> = ProviderBuilder::default().connect_client(rpc_client);
 
             inner.push(Arc::new(provider));
         }
@@ -153,9 +155,9 @@ impl EthHttpCli {
         self.chain_id
     }
 
-    pub async fn get_txn_count(&self, address: Address) -> Result<u64> {
+    pub async fn get_pending_txn_count(&self, address: Address) -> Result<u64> {
         tokio::time::timeout(Duration::from_secs(10), async {
-            let nonce = self.inner[0].get_transaction_count(address).await?;
+            let nonce = self.inner[0].get_transaction_count(address).pending().await?;
             Ok(nonce)
         })
         .await?
@@ -177,22 +179,6 @@ impl EthHttpCli {
             .await;
 
         result.with_context(|| "Failed to verify connection to Ethereum node")
-    }
-
-    /// Get account transaction count (nonce)
-    #[allow(unused)]
-    pub async fn get_transaction_count(&self, address: Address) -> Result<u64> {
-        let start = Instant::now();
-
-        let result = self
-            .retry_with_backoff(|| async { self.inner[0].get_transaction_count(address).await })
-            .await;
-
-        self.update_metrics("eth_getTransactionCount", result.is_ok(), start.elapsed())
-            .await;
-
-        result
-            .with_context(|| format!("Failed to get transaction count for address: {:?}", address))
     }
 
     /// Get account balance
@@ -487,8 +473,37 @@ impl EthHttpCli {
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
     }
 
-    pub async fn get_account(&self, address: Address) -> Result<Account> {
-        self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
-            .await
+    pub async fn get_latest_txn_count(&self, address: &Address) -> Result<u64> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let nonce = self.inner[0].get_transaction_count(*address).latest().await?;
+            Ok(nonce)
+        })
+        .await?
+    }
+
+
+    // pub async fn get_account(&self, address: Address) -> Result<Account> {
+    //     self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
+    //         .await
+    // }
+
+    /// Get full txpool content (WARNING: can be large, use sparingly)
+    /// This is used for nonce correction when queued/pending ratio is too high
+    pub async fn get_txpool_content(&self) -> Result<TxPoolContent> {
+        let start = Instant::now();
+
+        let result = self
+            .retry_with_backoff(|| async {
+                let result: TxPoolContent = self.inner[0]
+                    .raw_request::<(), TxPoolContent>("txpool_content".into(), ())
+                    .await?;
+                Ok(result)
+            })
+            .await;
+
+        self.update_metrics("txpool_content", result.is_ok(), start.elapsed())
+            .await;
+
+        result.with_context(|| "Failed to get txpool content")
     }
 }

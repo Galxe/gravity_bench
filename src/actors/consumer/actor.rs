@@ -283,49 +283,72 @@ impl Consumer {
                         return;
                     }
 
+                    // --- Handle permanent errors that should NOT be retried ---
+                    // These errors will never succeed no matter how many times we retry
+                    if error_string.contains("insufficient funds")
+                        || error_string.contains("insufficient balance")
+                        || error_string.contains("gas limit exceeded")
+                        || error_string.contains("exceeds block gas limit")
+                        || error_string.contains("intrinsic gas too low")
+                    {
+                        error!(
+                            "Permanent error for txn {:?}: {}, marking as failed (no retry)",
+                            metadata.txn_id, e
+                        );
+                        // Treat as NonceTooLow with placeholder values - this will mark as resolved
+                        // without infinite retry. The transaction is dropped.
+                        monitor_addr.do_send(UpdateSubmissionResult {
+                            metadata,
+                            result: Arc::new(SubmissionResult::NonceTooLow {
+                                tx_hash: keccak256(&signed_txn.bytes),
+                                expect_nonce: 0, // placeholder
+                                actual_nonce: 0, // placeholder
+                                from_account: Arc::new(alloy::primitives::Address::ZERO),
+                            }),
+                            rpc_url: url,
+                            send_time: Instant::now(),
+                            signed_bytes: Arc::new(signed_txn.bytes.clone()),
+                        });
+                        transactions_sending.fetch_sub(1, Ordering::Relaxed);
+                        return;
+                    }
+
                     // --- Requirement 2: If it's a Nonce related error ---
                     // "nonce too low" or "invalid nonce" suggests the on-chain nonce may have advanced
                     if error_string.contains("nonce too low")
                         || error_string.contains("invalid nonce")
                     {
-                        // Check current on-chain nonce to determine final state
-                        if let Ok(next_nonce) = dispatcher
-                            .provider(&url)
-                            .await
-                            .unwrap()
-                            .get_txn_count(metadata.from_account.as_ref().clone())
-                            .await
-                        {
-                            // If on-chain nonce is greater than our attempted nonce, our transaction is indeed outdated
-                            if next_nonce > metadata.nonce {
-                                // Try to find the hash of the transaction using our nonce
-                                let actual_nonce = metadata.nonce;
-                                let from_account = metadata.from_account.clone();
-                                // Can't find hash, but can provide correct nonce
-                                monitor_addr.do_send(UpdateSubmissionResult {
-                                    metadata,
-                                    result: Arc::new(SubmissionResult::NonceTooLow {
-                                        tx_hash: keccak256(&signed_txn.bytes),
-                                        expect_nonce: next_nonce,
-                                        actual_nonce,
-                                        from_account,
-                                    }),
-                                    rpc_url: url,
-                                    send_time: Instant::now(),
-                                    signed_bytes: Arc::new(signed_txn.bytes.clone()),
-                                });
-                            }
-                        } else {
-                            // Failed to get nonce, can only mark as retryable error
-                            warn!("Failed to get nonce for txn {:?}: {}", metadata.txn_id, e);
-                            monitor_addr.do_send(UpdateSubmissionResult {
-                                metadata,
-                                result: Arc::new(SubmissionResult::ErrorWithRetry),
-                                rpc_url: "unknown".to_string(),
-                                send_time: Instant::now(),
-                                signed_bytes: Arc::new(signed_txn.bytes.clone()),
-                            });
-                        }
+                        // The RPC already told us "nonce too low" - trust this directly.
+                        // Try to get current nonce for better logging, but don't fail if we can't.
+                        let (expect_nonce, actual_nonce, from_account) = 
+                            if let Ok(next_nonce) = dispatcher
+                                .provider(&url)
+                                .await
+                                .unwrap()
+                                .get_pending_txn_count(metadata.from_account.as_ref().clone())
+                                .await
+                            {
+                                (next_nonce, metadata.nonce, metadata.from_account.clone())
+                            } else {
+                                // Failed to get nonce, but RPC already said "nonce too low"
+                                // Use 0 as placeholder - the important thing is NOT to retry
+                                warn!("Nonce too low but failed to get current nonce for {:?}, treating as resolved", metadata.txn_id);
+                                (0, metadata.nonce, metadata.from_account.clone())
+                            };
+                        
+                        monitor_addr.do_send(UpdateSubmissionResult {
+                            metadata,
+                            result: Arc::new(SubmissionResult::NonceTooLow {
+                                tx_hash: keccak256(&signed_txn.bytes),
+                                expect_nonce,
+                                actual_nonce,
+                                from_account,
+                            }),
+                            rpc_url: url,
+                            send_time: Instant::now(),
+                            signed_bytes: Arc::new(signed_txn.bytes.clone()),
+                        });
+                        
                         // After encountering Nonce error, should stop retrying and return regardless
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
                         return;
