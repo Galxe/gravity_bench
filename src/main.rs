@@ -41,6 +41,9 @@ struct Args {
 
     #[arg(long, default_value = "bench_config.toml")]
     config: String,
+
+    #[arg(long, default_value_t = false)]
+    faucet_only: bool,
 }
 
 // mod uniswap;
@@ -477,6 +480,11 @@ async fn start_bench() -> Result<()> {
             init_nonce_map.clone(),
         )
         .await?;
+    }
+
+    if args.faucet_only {
+        info!("Faucet distribution complete. Faucet-only mode enabled, exiting.");
+        return Ok(());
     }
 
     let tps = benchmark_config.target_tps as usize;
