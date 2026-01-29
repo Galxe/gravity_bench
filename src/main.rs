@@ -44,6 +44,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     faucet_only: bool,
+
+    #[arg(long)]
+    accounts_output: Option<String>,
 }
 
 // mod uniswap;
@@ -409,6 +412,10 @@ async fn start_bench() -> Result<()> {
 
     let account_manager = accout_generator.to_manager();
 
+    if let Some(path) = &args.accounts_output {
+        save_accounts(&account_manager, path).await?;
+    }
+
     let address_pool: Arc<dyn AddressPool> = match benchmark_config.address_pool_type {
         config::AddressPoolType::Random => {
             info!("Using RandomAddressPool");
@@ -580,6 +587,28 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         elapsed.as_secs_f64(),
         rate
     );
+}
+
+const HEADER: &str = "Address, Private Key";
+async fn save_accounts(account_manager: &AccountManager, path: &str) -> Result<()> {
+    let file = tokio::fs::File::create(path).await?;
+    let mut buffer = tokio::io::BufWriter::new(file);
+
+    use tokio::io::AsyncWriteExt; // Import AsyncWriteExt trait
+    buffer.write_all(HEADER.as_bytes()).await?;
+    buffer.write_all(b"\n").await?;
+
+    for (id, _) in account_manager.account_ids_with_nonce() {
+        let signer = account_manager.get_signer_by_id(id);
+        let address = signer.address();
+        let private_key = hex::encode(signer.to_bytes());
+        let line = format!("{:?}, {}\n", address, private_key);
+        buffer.write_all(line.as_bytes()).await?;
+    }
+
+    buffer.flush().await?;
+    info!("Accounts saved to {}", path);
+    Ok(())
 }
 
 #[cfg(feature = "dhat-heap")]
