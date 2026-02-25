@@ -191,7 +191,7 @@ impl Producer {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             let account_id = signed_txn.metadata.from_account_id;
-            let next_nonce = match nonce_cache.get(&account_id) {
+            let _next_nonce = match nonce_cache.get(&account_id) {
                 Some(nonce) => *nonce,
                 None => 0,
             };

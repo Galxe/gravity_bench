@@ -258,9 +258,6 @@ mod tests {
         // Print the faucet tree structure with actual addresses
         println!("\n=== Faucet Tree Structure ===");
 
-        let degree = 10;
-        let total_accounts = 1000000;
-
         // Faucet account (using the one from bench_config.toml)
         let faucet_pk = "5c173b12be434289682782ac6f7e7bf73a6fa5a20d507e318a4bdb039b1a5f6e";
         let faucet_bytes = hex::decode(faucet_pk).unwrap();
@@ -291,7 +288,6 @@ mod tests {
     #[tokio::test]
     async fn test_check_account_balances() {
         use crate::eth::EthHttpCli;
-        use alloy::primitives::U256;
 
         // Default config — adjust as needed
         let rpc_url = "http://localhost:8545";
