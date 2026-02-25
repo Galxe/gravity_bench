@@ -258,9 +258,6 @@ mod tests {
         // Print the faucet tree structure with actual addresses
         println!("\n=== Faucet Tree Structure ===");
 
-        let degree = 10;
-        let total_accounts = 1000000;
-
         // Faucet account (using the one from bench_config.toml)
         let faucet_pk = "5c173b12be434289682782ac6f7e7bf73a6fa5a20d507e318a4bdb039b1a5f6e";
         let faucet_bytes = hex::decode(faucet_pk).unwrap();
@@ -286,5 +283,156 @@ mod tests {
             println!("  ID {}: {:?}", id, signer.address());
         }
         println!("  ...");
+    }
+
+    #[tokio::test]
+    async fn test_check_account_balances() {
+        use crate::eth::EthHttpCli;
+
+        // Default config — adjust as needed
+        let rpc_url = "http://localhost:8545";
+        let chain_id: u64 = 7771625;
+        let num_accounts: u64 = 10;
+
+        // Generate accounts
+        let faucet_pk = "";
+        let faucet_bytes = hex::decode(faucet_pk).expect("invalid faucet private key hex");
+        let faucet_signer = PrivateKeySigner::from_slice(&faucet_bytes)
+            .expect("failed to create faucet signer");
+
+        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone());
+        let account_ids = generator
+            .gen_account(0, num_accounts)
+            .expect("failed to generate accounts");
+
+        // Connect to RPC
+        let eth_client = EthHttpCli::new(rpc_url, chain_id)
+            .expect("failed to create EthHttpCli — is the node running?");
+
+        println!("\n=== Account Balances ({} accounts) ===", num_accounts);
+        println!("RPC: {}", rpc_url);
+        println!("{:-<80}", "");
+
+        // Check faucet balance
+        let faucet_address = faucet_signer.address();
+        let faucet_balance = eth_client
+            .get_balance(&faucet_address)
+            .await
+            .expect("failed to get faucet balance");
+        println!(
+            "Faucet  : {:?}  balance = {} wei ({} ETH)",
+            faucet_address,
+            faucet_balance,
+            format_eth(faucet_balance),
+        );
+        println!("{:-<80}", "");
+
+        // Check each generated account's balance
+        for &id in &account_ids {
+            let address = generator.get_address_by_id(id);
+            let balance = eth_client
+                .get_balance(&address)
+                .await
+                .expect(&format!("failed to get balance for {:?}", address));
+            println!(
+                "ID {:>6}: {:?}  balance = {} wei ({} ETH)",
+                id.0,
+                address,
+                balance,
+                format_eth(balance),
+            );
+        }
+
+        println!("{:-<80}", "");
+        println!("Done. Checked {} accounts + faucet.", num_accounts);
+    }
+
+    #[tokio::test]
+    async fn test_faucet_eth_to_accounts() {
+        use crate::eth::{EthHttpCli, TxnBuilder};
+        use alloy::primitives::U256;
+
+        // Default config — adjust as needed
+        let rpc_url = "http://localhost:8545";
+        let chain_id: u64 = 7771625;
+        let num_accounts: u64 = 10;
+        let eth_amount = U256::from(10) * U256::from(10).pow(U256::from(18)); // 10 ETH
+
+        // Faucet signer
+        let faucet_pk = "";
+        let faucet_bytes = hex::decode(faucet_pk).expect("invalid faucet private key hex");
+        let faucet_signer =
+            PrivateKeySigner::from_slice(&faucet_bytes).expect("failed to create faucet signer");
+        let faucet_address = faucet_signer.address();
+
+        // Generate accounts
+        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone());
+        let account_ids = generator
+            .gen_account(0, num_accounts)
+            .expect("failed to generate accounts");
+
+        // Connect to RPC
+        let eth_client =
+            EthHttpCli::new(rpc_url, chain_id).expect("failed to connect — is the node running?");
+
+        // Get starting nonce for faucet
+        let mut nonce = eth_client
+            .get_pending_txn_count(faucet_address)
+            .await
+            .expect("failed to get faucet nonce");
+
+        println!("\n=== Faucet 10 ETH to {} accounts ===", num_accounts);
+        println!("Faucet : {:?}", faucet_address);
+        println!("Nonce  : {}", nonce);
+        println!("{:-<80}", "");
+
+        // Send 10 ETH to each account
+        for &id in &account_ids {
+            let to = generator.get_address_by_id(id);
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+            let tx_request =
+                TxnBuilder::eth_transfer_request(faucet_address, to, eth_amount, nonce, chain_id)
+                    .expect("failed to build tx request");
+            let tx_envelope = TxnBuilder::build_and_sign_transaction(tx_request, &faucet_signer)
+                .expect("failed to sign tx");
+            let tx_hash = eth_client
+                .send_tx_envelope(tx_envelope)
+                .await
+                .expect("failed to send tx");
+            println!(
+                "ID {:>6}: {:?}  tx = {:?}",
+                id.0, to, tx_hash,
+            );
+            nonce += 1;
+        }
+
+        println!("{:-<80}", "");
+        println!("Waiting for transactions to be included...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        // Print balances after faucet
+        println!("\n=== Balances after faucet ===");
+        for &id in &account_ids {
+            let address = generator.get_address_by_id(id);
+            let balance = eth_client
+                .get_balance(&address)
+                .await
+                .expect("failed to get balance");
+            println!(
+                "ID {:>6}: {:?}  balance = {} ETH",
+                id.0,
+                address,
+                format_eth(balance),
+            );
+        }
+        println!("Done.");
+    }
+
+    /// Format a U256 wei value as a human-readable ETH string.
+    fn format_eth(wei: alloy::primitives::U256) -> String {
+        let eth_decimals = alloy::primitives::U256::from(10).pow(alloy::primitives::U256::from(18));
+        let whole = wei / eth_decimals;
+        let frac = wei % eth_decimals;
+        format!("{}.{:018}", whole, frac)
     }
 }
