@@ -216,7 +216,7 @@ impl Consumer {
                 metadata.txn_id
             );
             match dispatcher
-                .send_tx(signed_txn.bytes.clone(), metadata.txn_id)
+                .send_tx(signed_txn.bytes.clone(), metadata.txn_id, metadata.from_account_id.0)
                 .await
             {
                 // Transaction sent successfully

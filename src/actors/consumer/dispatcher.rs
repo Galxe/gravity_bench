@@ -15,6 +15,7 @@ pub trait Dispatcher: Send + Sync {
         &self,
         tx_bytes: Vec<u8>,
         txn_id: Uuid,
+        account_id: u32,
     ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)>;
 
     async fn provider(&self, rpc: &str) -> Result<Arc<EthHttpCli>>;
@@ -22,7 +23,7 @@ pub trait Dispatcher: Send + Sync {
     fn get_providers(&self) -> Vec<Arc<EthHttpCli>>;
 }
 
-/// Simple dispatcher that routes transactions based on txn_id modulo
+/// Simple dispatcher that routes transactions based on account_id modulo
 #[derive(Clone)]
 pub struct SimpleDispatcher {
     providers: Vec<Arc<EthHttpCli>>,
@@ -34,10 +35,9 @@ impl SimpleDispatcher {
         Self { providers }
     }
 
-    /// Select provider based on txn_id hash
-    fn select_provider(&self, txn_id: Uuid) -> &Arc<EthHttpCli> {
-        let hash = txn_id.as_u128();
-        let index = (hash % self.providers.len() as u128) as usize;
+    /// Select provider based on account_id for deterministic routing
+    fn select_provider(&self, account_id: u32) -> &Arc<EthHttpCli> {
+        let index = (account_id as usize) % self.providers.len();
         &self.providers[index]
     }
 }
@@ -47,9 +47,10 @@ impl Dispatcher for SimpleDispatcher {
     async fn send_tx(
         &self,
         bytes: Vec<u8>,
-        txn_id: Uuid,
+        _txn_id: Uuid,
+        account_id: u32,
     ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)> {
-        let provider = self.select_provider(txn_id);
+        let provider = self.select_provider(account_id);
         let rpc_url = provider.rpc().as_ref().clone();
         let tx_hash = provider
             .send_raw_tx(bytes)

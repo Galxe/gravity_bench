@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AccountId(u32);
+pub struct AccountId(pub u32);
 
 const CACHE_SIZE: usize = 1024 * 1024;
 
