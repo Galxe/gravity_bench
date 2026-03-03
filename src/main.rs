@@ -4,6 +4,7 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -47,6 +48,16 @@ struct Args {
 
     #[arg(long)]
     accounts_output: Option<String>,
+}
+
+/// Snapshot persisted between runs for deterministic recovery.
+/// Contains the seed for account generation and the faucet nonce
+/// at the start of distribution, so that recovery can correctly
+/// skip already-completed faucet levels.
+#[derive(Serialize, Deserialize, Debug)]
+struct Snapshot {
+    seed: String,
+    faucet_start_nonce: u64,
 }
 
 // mod uniswap;
@@ -310,11 +321,21 @@ async fn start_bench() -> Result<()> {
         Some(guard)
     };
 
-    let contract_config = if args.recover {
+    let (contract_config, seed, snapshot_start_nonce) = if args.recover {
         info!("Starting in recovery mode...");
         let contract_config =
             ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
-        contract_config
+        let snapshot_json = std::fs::read_to_string("snapshot.json").unwrap_or_else(|e| {
+            panic!("Failed to read snapshot.json in recovery mode: {}", e);
+        });
+        let snapshot: Snapshot = serde_json::from_str(&snapshot_json).unwrap_or_else(|e| {
+            panic!("Failed to parse snapshot.json: {}", e);
+        });
+        let seed_bytes = hex::decode(snapshot.seed.trim()).expect("Invalid hex seed in snapshot.json");
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&seed_bytes);
+        info!("Recovered faucet_start_nonce: {}", snapshot.faucet_start_nonce);
+        (contract_config, seed, Some(snapshot.faucet_start_nonce))
     } else {
         info!("Starting in normal mode...");
         let mut command = format!(
@@ -335,10 +356,15 @@ async fn start_bench() -> Result<()> {
         .unwrap_or_else(|e| {
             panic!("Contract config file not found {}", e);
         });
-        contract_config
+        
+        let seed: [u8; 32] = rand::random();
+        (contract_config, seed, None)
     };
+    tracing::info!("Account generator seed: 0x{}", hex::encode(seed));
+
     let mut accout_generator = AccountGenerator::with_capacity(
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap(),
+        seed,
     );
     let account_ids = accout_generator
         .gen_account(0, benchmark_config.accounts.num_accounts as u64)
@@ -362,7 +388,26 @@ async fn start_bench() -> Result<()> {
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     info!("Initializing Faucet constructor...");
-    let mut start_nonce = contract_config.get_all_token().len() as u64;
+    let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
+    let on_chain_nonce = eth_clients[0].get_pending_txn_count(faucet_address).await.unwrap();
+    // In recover mode, use the saved start_nonce so that the skip logic
+    // correctly identifies already-completed Level 0 transactions.
+    // In normal mode, use the current on-chain nonce.
+    let mut start_nonce = snapshot_start_nonce.unwrap_or(on_chain_nonce);
+    info!("Faucet on-chain nonce: {}, using start_nonce: {}", on_chain_nonce, start_nonce);
+
+    // Save snapshot in normal mode (after we know the start_nonce)
+    if !args.recover {
+        let snapshot = Snapshot {
+            seed: hex::encode(seed),
+            faucet_start_nonce: start_nonce,
+        };
+        let snapshot_json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write("snapshot.json", &snapshot_json).unwrap_or_else(|e| {
+            panic!("Failed to write snapshot.json: {}", e);
+        });
+        info!("Snapshot saved to snapshot.json");
+    }
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
         benchmark_config.faucet.fauce_eth_balance,

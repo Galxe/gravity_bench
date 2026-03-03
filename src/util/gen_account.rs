@@ -22,13 +22,15 @@ const CACHE_SIZE: usize = 1024 * 1024;
 pub struct AccountSignerCache {
     signers: Vec<PrivateKeySigner>,
     size: usize,
+    seed: [u8; 32],
 }
 
 impl AccountSignerCache {
-    pub(crate) fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize, seed: [u8; 32]) -> Self {
         Self {
             signers: Vec::with_capacity(size),
             size,
+            seed,
         }
     }
 
@@ -45,13 +47,16 @@ impl AccountSignerCache {
 
     pub(crate) fn get_signer(&self, index: usize) -> PrivateKeySigner {
         if index >= self.signers.len() {
-            return Self::compute_signer(AccountId(index as u32));
+            return self.compute_signer(AccountId(index as u32));
         }
         self.signers[index].clone()
     }
 
-    fn compute_signer(id: AccountId) -> PrivateKeySigner {
-        let private_key_bytes = keccak256((id.0 as u64).to_le_bytes());
+    fn compute_signer(&self, id: AccountId) -> PrivateKeySigner {
+        let mut data = Vec::with_capacity(40);
+        data.extend_from_slice(&self.seed);
+        data.extend_from_slice(&(id.0 as u64).to_le_bytes());
+        let private_key_bytes = keccak256(&data);
         PrivateKeySigner::from_slice(private_key_bytes.as_slice())
             .context("Failed to create deterministic signer")
             .unwrap()
@@ -65,19 +70,21 @@ pub struct AccountGenerator {
     faucet_accout: PrivateKeySigner,
     faucet_accout_id: AccountId,
     init_nonces: Vec<Arc<AtomicU64>>,
+    seed: [u8; 32],
 }
 
 pub type AccountManager = Arc<AccountGenerator>;
 
 impl AccountGenerator {
-    pub fn with_capacity(faucet_accout: PrivateKeySigner) -> Self {
+    pub fn with_capacity(faucet_accout: PrivateKeySigner, seed: [u8; 32]) -> Self {
         Self {
-            accout_signers: AccountSignerCache::new(CACHE_SIZE),
+            accout_signers: AccountSignerCache::new(CACHE_SIZE, seed),
             accout_addresses: Vec::new(),
             address_to_id: HashMap::new(),
             faucet_accout,
             faucet_accout_id: AccountId(u32::MAX),
             init_nonces: Vec::new(),
+            seed,
         }
     }
 
@@ -156,10 +163,14 @@ impl AccountGenerator {
         start_index: u64,
         end_index: u64,
     ) -> Vec<PrivateKeySigner> {
+        let seed_array = self.seed;
         let accounts = (start_index..end_index)
             .into_par_iter()
-            .map(|seed| {
-                let private_key_bytes = keccak256(seed.to_le_bytes());
+            .map(|index| {
+                let mut data = Vec::with_capacity(40);
+                data.extend_from_slice(&seed_array);
+                data.extend_from_slice(&index.to_le_bytes());
+                let private_key_bytes = keccak256(&data);
 
                 let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice())
                     .context("Failed to create deterministic signer")
@@ -192,10 +203,14 @@ mod tests {
     fn test_compute_account_address() {
         // Test computing address for specific account IDs
         let test_ids = vec![0, 1, 100, 1000, 10000, 100000, 1000000];
+        let seed = [0u8; 32];
 
         println!("\n=== Account ID to Address Mapping ===");
         for id in test_ids {
-            let private_key_bytes = keccak256((id as u64).to_le_bytes());
+            let mut data = Vec::with_capacity(40);
+            data.extend_from_slice(&seed);
+            data.extend_from_slice(&(id as u64).to_le_bytes());
+            let private_key_bytes = keccak256(&data);
             let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice()).unwrap();
             let address = signer.address();
 
@@ -214,11 +229,15 @@ mod tests {
         // Search final recipients in batches
         println!("Searching final recipients (0-999999) in batches...");
         let batch_size = 10000;
+        let seed = [0u8; 32];
         for batch_start in (0..1000000).step_by(batch_size) {
             let batch_end = (batch_start + batch_size).min(1000000);
 
             for id in batch_start..batch_end {
-                let private_key_bytes = keccak256((id as u64).to_le_bytes());
+                let mut data = Vec::with_capacity(40);
+                data.extend_from_slice(&seed);
+                data.extend_from_slice(&(id as u64).to_le_bytes());
+                let private_key_bytes = keccak256(&data);
                 let signer = PrivateKeySigner::from_slice(private_key_bytes.as_slice()).unwrap();
                 let address = format!("{:?}", signer.address()).to_lowercase();
 
@@ -237,7 +256,10 @@ mod tests {
                     println!("  Parent index in Level 5: {}", parent_index_in_level5);
                     println!("  Parent account ID: {}", parent_id);
 
-                    let parent_pk = keccak256((parent_id as u64).to_le_bytes());
+                    let mut p_data = Vec::with_capacity(40);
+                    p_data.extend_from_slice(&seed);
+                    p_data.extend_from_slice(&(parent_id as u64).to_le_bytes());
+                    let parent_pk = keccak256(&p_data);
                     let parent_signer = PrivateKeySigner::from_slice(parent_pk.as_slice()).unwrap();
                     println!("  Parent address: {:?}", parent_signer.address());
 
@@ -265,10 +287,14 @@ mod tests {
         println!("Faucet: {:?}", faucet_signer.address());
 
         // Level 0 (first 10 intermediate accounts)
+        let seed = [0u8; 32];
         println!("\nLevel 0 (indices 1000000-1000009):");
         for i in 0..3 {
             let id = 1000000 + i;
-            let pk = keccak256((id as u64).to_le_bytes());
+            let mut data = Vec::with_capacity(40);
+            data.extend_from_slice(&seed);
+            data.extend_from_slice(&(id as u64).to_le_bytes());
+            let pk = keccak256(&data);
             let signer = PrivateKeySigner::from_slice(pk.as_slice()).unwrap();
             println!("  ID {}: {:?}", id, signer.address());
         }
@@ -278,7 +304,10 @@ mod tests {
         println!("\nLevel 1 (indices 1000010-1000109, showing first 3):");
         for i in 0..3 {
             let id = 1000010 + i;
-            let pk = keccak256((id as u64).to_le_bytes());
+            let mut data = Vec::with_capacity(40);
+            data.extend_from_slice(&seed);
+            data.extend_from_slice(&(id as u64).to_le_bytes());
+            let pk = keccak256(&data);
             let signer = PrivateKeySigner::from_slice(pk.as_slice()).unwrap();
             println!("  ID {}: {:?}", id, signer.address());
         }
@@ -300,7 +329,7 @@ mod tests {
         let faucet_signer = PrivateKeySigner::from_slice(&faucet_bytes)
             .expect("failed to create faucet signer");
 
-        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone());
+        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone(), [0u8; 32]);
         let account_ids = generator
             .gen_account(0, num_accounts)
             .expect("failed to generate accounts");
@@ -366,7 +395,7 @@ mod tests {
         let faucet_address = faucet_signer.address();
 
         // Generate accounts
-        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone());
+        let mut generator = AccountGenerator::with_capacity(faucet_signer.clone(), [0u8; 32]);
         let account_ids = generator
             .gen_account(0, num_accounts)
             .expect("failed to generate accounts");
