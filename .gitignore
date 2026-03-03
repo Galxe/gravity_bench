@@ -16,3 +16,4 @@ log.log
 *.log
 venv/
 accounts.txt
+snapshot.json
