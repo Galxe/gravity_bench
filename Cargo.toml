@@ -9,7 +9,7 @@ tokio = { version = "1.0", features = ["full"] }
 actix = "0.13"
 
 # Ethereum interaction
-alloy = { version = "=1.0", features = ["full", "rlp", "hyper", "rpc", "rpc-types-json", "json-rpc"] }
+alloy = { version = "1.8", features = ["full", "rlp", "rpc"] }
 
 # Serialization & Config
 serde = { version = "1.0", features = ["derive"] }
@@ -32,7 +32,7 @@ bytes = "1.0"
 tokio-util = "0.7"
 
 # HTTP client for RPC
-reqwest = { version = "0.12", features = ["json", "http2"] }
+reqwest = { version = "0.13", features = ["json", "http2"] }
 
 # Random number generation
 rand = "0.8"
