@@ -15,8 +15,14 @@ use std::{
 };
 use tracing::info;
 
-// Gas parameters must match the values used in the plan executor.
-const GAS_PRICE: u64 = 2100000000000000; // 210 Gwei
+// Per-transaction gas cost budget (in wei) used by the faucet plan to reserve
+// enough ETH on each intermediate account to cover its outgoing transactions.
+//
+// Value = max_fee_per_gas * worst-case gas_limit. With BENCH_MAX_FEE_PER_GAS
+// at 100 Gwei and worst-case per-txn gas around 100k (contract calls), the
+// budget is 1e16 wei = 0.01 ETH per txn, leaving headroom for tip and
+// rounding. Bumping max_fee_per_gas requires bumping this in lockstep.
+const GAS_COST_PER_TXN_BUDGET: u64 = 10_000_000_000_000_000;
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();
@@ -58,7 +64,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let round_total_accounts_num = degree.pow(total_levels as u32);
 
         let degree_u256 = U256::from(degree);
-        let gas_cost_per_txn = U256::from(GAS_PRICE);
+        let gas_cost_per_txn = U256::from(GAS_COST_PER_TXN_BUDGET);
 
         let (amount_per_recipient, intermediate_funding_amounts) = if total_levels > 1 {
             // This is a multi-level distribution.
@@ -196,7 +202,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
     ) -> Box<dyn TxnPlan> {
         let senders = self.get_senders_for_level(level);
         let is_final_level = level == self.total_levels.saturating_sub(1);
-        
+
         // Generate descriptive plan name
         let token_name = self.txn_builder.token_name();
         let plan_name = format!("Level{}Faucet{}Plan", level, token_name);

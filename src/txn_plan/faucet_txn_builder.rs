@@ -6,6 +6,8 @@ use alloy::{
     sol_types::SolCall,
 };
 
+use crate::eth::{BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS};
+
 // Define the ERC20 interface for transfer
 sol! {
     interface IERC20 {
@@ -45,8 +47,8 @@ impl FaucetTxnBuilder for EthFaucetTxnBuilder {
             .with_value(value)
             .with_nonce(nonce)
             .with_chain_id(chain_id)
-            .with_max_priority_fee_per_gas(10_000_000_000)
-            .with_max_fee_per_gas(10_000_000_000)
+            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
             .with_gas_limit(21_000) // Standard gas for ETH transfer
     }
 
@@ -83,8 +85,8 @@ impl FaucetTxnBuilder for Erc20FaucetTxnBuilder {
             .with_input(calldata.abi_encode())
             .with_nonce(nonce)
             .with_chain_id(chain_id)
-            .with_max_priority_fee_per_gas(10_000_000_000)
-            .with_max_fee_per_gas(10_000_000_000)
+            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
             .with_gas_limit(60_000) // A reasonable default for ERC20 transfers
     }
 
