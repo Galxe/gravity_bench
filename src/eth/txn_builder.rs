@@ -8,6 +8,15 @@ use alloy::{
 use anyhow::Result;
 use tracing::debug;
 
+/// Max fee per gas for bench transactions (100 Gwei).
+///
+/// Must stay above Gravity's 50 Gwei protocol minimum base fee with headroom
+/// for transient base-fee spikes under load.
+pub const BENCH_MAX_FEE_PER_GAS: u128 = 100_000_000_000;
+
+/// Priority fee (tip) for bench transactions (1 Gwei).
+pub const BENCH_MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+
 /// TxnBuilder - Build and sign transactions
 pub struct TxnBuilder;
 
@@ -60,8 +69,8 @@ impl TxnBuilder {
             .with_value(eth_amount)
             .with_nonce(nonce)
             .with_chain_id(chain_id)
-            .with_max_priority_fee_per_gas(10_000_000_000) // 1 gwei
-            .with_max_fee_per_gas(10_000_000_000) // 10 gwei
+            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
             .with_gas_limit(300_000);
 
         Ok(tx_request)
@@ -81,8 +90,8 @@ impl TxnBuilder {
             .with_value(amount)
             .with_nonce(nonce)
             .with_chain_id(chain_id)
-            .with_max_priority_fee_per_gas(100_000_000)
-            .with_max_fee_per_gas(100_000_000)
+            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
             .with_gas_limit(100_000);
 
         Ok(tx_request)
@@ -100,8 +109,8 @@ impl TxnBuilder {
             .with_value(amount)
             .with_nonce(nonce)
             .with_chain_id(chain_id)
-            .with_max_priority_fee_per_gas(100_000_000)
-            .with_max_fee_per_gas(100_000_000)
+            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
             .with_gas_limit(100_000);
 
         Ok(tx_request)
