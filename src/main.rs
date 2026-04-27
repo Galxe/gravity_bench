@@ -546,27 +546,53 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         let addr = account.clone();
         let pb = pb.clone();
         async move {
-            let mut init_nonce = None;
-            {
-                for _ in 0..5 {
-                    let res = tokio::time::timeout(
-                        std::time::Duration::from_secs(10),
-                        client.get_pending_txn_count(addr),
-                    )
-                    .await;
-                    if res.is_ok() {
-                        init_nonce = res.ok();
+            // Retry up to 5 times. The previous version checked `res.is_ok()` which
+            // is the tokio timeout outer Result — it stays Ok even when the inner
+            // RPC call returns Err (connection drop, etc.), so the loop would break
+            // on the first RPC error and panic. Match both layers so we actually
+            // retry on RPC errors and timeouts.
+            let mut init_nonce: Option<u64> = None;
+            for attempt in 0..5 {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    client.get_pending_txn_count(addr),
+                )
+                .await
+                {
+                    Ok(Ok(n)) => {
+                        init_nonce = Some(n);
                         break;
                     }
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            "nonce init RPC error for {} (attempt {}/5): {}",
+                            addr,
+                            attempt + 1,
+                            e
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "nonce init timeout for {} (attempt {}/5)",
+                            addr,
+                            attempt + 1
+                        );
+                    }
+                }
+                if attempt < 4 {
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        500 * (attempt as u64 + 1),
+                    ))
+                    .await;
                 }
             }
-            match &init_nonce {
-                Some(Ok(init_nonce)) => {
-                    nonce.store(*init_nonce, Ordering::Relaxed);
+            match init_nonce {
+                Some(n) => {
+                    nonce.store(n, Ordering::Relaxed);
                     pb.inc(1);
                 }
-                _ => {
-                    tracing::error!("Failed to get nonce for address: {:?}", init_nonce);
+                None => {
+                    tracing::error!("Failed to get nonce for {} after 5 retries", addr);
                     panic!("Failed to get nonce for address: {}", addr);
                 }
             }
