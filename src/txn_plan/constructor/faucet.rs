@@ -15,14 +15,9 @@ use std::{
 };
 use tracing::info;
 
-// Per-transaction gas cost budget (in wei) used by the faucet plan to reserve
-// enough ETH on each intermediate account to cover its outgoing transactions.
-//
-// Value = max_fee_per_gas * worst-case gas_limit. With BENCH_MAX_FEE_PER_GAS
-// at 100 Gwei and worst-case per-txn gas around 100k (contract calls), the
-// budget is 1e16 wei = 0.01 ETH per txn, leaving headroom for tip and
-// rounding. Bumping max_fee_per_gas requires bumping this in lockstep.
-const GAS_COST_PER_TXN_BUDGET: u64 = 10_000_000_000_000_000;
+// Per-transaction gas cost budget (in wei). Bumped in lockstep with
+// BENCH_MAX_FEE_PER_GAS = 5000 Gwei × worst-case 100k gas = 5e17 wei = 0.5 ETH/txn.
+const GAS_COST_PER_TXN_BUDGET: u64 = 500_000_000_000_000_000;
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();
