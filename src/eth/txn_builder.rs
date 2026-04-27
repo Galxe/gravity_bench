@@ -8,14 +8,20 @@ use alloy::{
 use anyhow::Result;
 use tracing::debug;
 
-/// Max fee per gas for bench transactions (100 Gwei).
+/// Max fee per gas for bench transactions (5000 Gwei).
 ///
-/// Must stay above Gravity's 50 Gwei protocol minimum base fee with headroom
-/// for transient base-fee spikes under load.
-pub const BENCH_MAX_FEE_PER_GAS: u128 = 100_000_000_000;
+/// Must stay above Gravity's 50 Gwei protocol minimum base fee with enough
+/// headroom that the effective tip (max_priority_fee_per_gas) clears the
+/// gravity-reth txpool promotion threshold. Empirically, transactions with
+/// a 1 Gwei priority fee linger in the `queued` bucket and are never
+/// promoted to `pending`; a tip in the hundreds of Gwei is required.
+pub const BENCH_MAX_FEE_PER_GAS: u128 = 5_000_000_000_000;
 
-/// Priority fee (tip) for bench transactions (1 Gwei).
-pub const BENCH_MAX_PRIORITY_FEE_PER_GAS: u128 = 1_000_000_000;
+/// Priority fee (tip) for bench transactions (500 Gwei).
+///
+/// See `BENCH_MAX_FEE_PER_GAS` — 1 Gwei was below the gravity-reth
+/// txpool promotion threshold under load, so transactions never landed.
+pub const BENCH_MAX_PRIORITY_FEE_PER_GAS: u128 = 500_000_000_000;
 
 /// TxnBuilder - Build and sign transactions
 pub struct TxnBuilder;
