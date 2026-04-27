@@ -84,10 +84,7 @@ impl WeightedAddressPool {
             long_tail_ready_accounts,
         };
 
-        Self {
-            inner: Mutex::new(inner),
-            account_generator,
-        }
+        Self { inner: Mutex::new(inner), account_generator }
     }
 
     fn unlock_account(&self, account: AccountId, nonce: Option<u32>) {

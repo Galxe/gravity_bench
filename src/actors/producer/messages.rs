@@ -12,18 +12,9 @@ pub struct RegisterTxnPlan {
 impl RegisterTxnPlan {
     pub fn new(
         plan: Box<dyn TxnPlan>,
-    ) -> (
-        Self,
-        tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>,
-    ) {
+    ) -> (Self, tokio::sync::oneshot::Receiver<Result<(), anyhow::Error>>) {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        (
-            Self {
-                plan,
-                responder: tx,
-            },
-            rx,
-        )
+        (Self { plan, responder: tx }, rx)
     }
 }
 

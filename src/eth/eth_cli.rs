@@ -111,10 +111,7 @@ impl EthHttpCli {
 
     /// Create new TxnSender instance
     pub fn new(rpc_url: &str, chain_id: u64) -> Result<Self> {
-        debug!(
-            "Creating TxnSender for URL: {}, Chain ID: {}",
-            rpc_url, chain_id
-        );
+        debug!("Creating TxnSender for URL: {}, Chain ID: {}", rpc_url, chain_id);
         // Parse URL
 
         let url =
@@ -131,7 +128,8 @@ impl EthHttpCli {
 
             let http = Http::with_client(client, url.clone());
             let rpc_client = RpcClient::new(http, true);
-            let provider: RootProvider<Ethereum> = ProviderBuilder::default().connect_client(rpc_client);
+            let provider: RootProvider<Ethereum> =
+                ProviderBuilder::default().connect_client(rpc_client);
 
             inner.push(Arc::new(provider));
         }
@@ -175,8 +173,7 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| "Failed to verify connection to Ethereum node")
     }
@@ -186,12 +183,10 @@ impl EthHttpCli {
     pub async fn get_balance(&self, address: &Address) -> Result<U256> {
         let start = Instant::now();
 
-        let result = self
-            .retry_with_backoff(|| async { self.inner[0].get_balance(*address).await })
-            .await;
+        let result =
+            self.retry_with_backoff(|| async { self.inner[0].get_balance(*address).await }).await;
 
-        self.update_metrics("eth_getBalance", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_getBalance", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| format!("Failed to get balance for address: {:?}", address))
     }
@@ -201,12 +196,10 @@ impl EthHttpCli {
     pub async fn get_gas_price(&self) -> Result<u128> {
         let start = Instant::now();
 
-        let result = self
-            .retry_with_backoff(|| async { self.inner[0].get_gas_price().await })
-            .await;
+        let result =
+            self.retry_with_backoff(|| async { self.inner[0].get_gas_price().await }).await;
 
-        self.update_metrics("eth_gasPrice", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_gasPrice", result.is_ok(), start.elapsed()).await;
 
         result
             .map_err(|e| anyhow::anyhow!("Failed to get gas price: {:?}", e))
@@ -226,8 +219,7 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics("txpool_status", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("txpool_status", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| "Failed to get mempool status")
     }
@@ -237,12 +229,10 @@ impl EthHttpCli {
     pub async fn get_block_number(&self) -> Result<u64> {
         let start = Instant::now();
 
-        let result = self
-            .retry_with_backoff(|| async { self.inner[0].get_block_number().await })
-            .await;
+        let result =
+            self.retry_with_backoff(|| async { self.inner[0].get_block_number().await }).await;
 
-        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_blockNumber", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| "Failed to get block number")
     }
@@ -364,23 +354,12 @@ impl EthHttpCli {
 
         // Add summary row for RPC metrics
         let total_sent: u64 = metrics.per_method.values().map(|m| m.requests_sent).sum();
-        let total_succeeded: u64 = metrics
-            .per_method
-            .values()
-            .map(|m| m.requests_succeeded)
-            .sum();
+        let total_succeeded: u64 = metrics.per_method.values().map(|m| m.requests_succeeded).sum();
         let total_failed: u64 = metrics.per_method.values().map(|m| m.requests_failed).sum();
-        let overall_success_rate = if total_sent > 0 {
-            total_succeeded as f64 / total_sent as f64 * 100.0
-        } else {
-            0.0
-        };
+        let overall_success_rate =
+            if total_sent > 0 { total_succeeded as f64 / total_sent as f64 * 100.0 } else { 0.0 };
         let overall_avg_latency = if total_sent > 0 {
-            let total_latency: u64 = metrics
-                .per_method
-                .values()
-                .map(|m| m.total_latency_ms)
-                .sum();
+            let total_latency: u64 = metrics.per_method.values().map(|m| m.total_latency_ms).sum();
             total_latency as f64 / total_sent as f64
         } else {
             0.0
@@ -422,12 +401,7 @@ impl EthHttpCli {
             Err(e) => Err(anyhow::Error::from(e)),
         };
 
-        self.update_metrics(
-            "eth_sendRawTransaction",
-            final_result.is_ok(),
-            start.elapsed(),
-        )
-        .await;
+        self.update_metrics("eth_sendRawTransaction", final_result.is_ok(), start.elapsed()).await;
 
         final_result
     }
@@ -450,8 +424,7 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics("eth_sendRawTransaction", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_sendRawTransaction", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| "Failed to send transaction envelope")
     }
@@ -467,8 +440,7 @@ impl EthHttpCli {
             .retry_with_backoff(|| async { self.inner[idx].get_transaction_receipt(tx_hash).await })
             .await;
 
-        self.update_metrics("eth_getTransactionReceipt", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("eth_getTransactionReceipt", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| format!("Failed to get transaction receipt for hash: {:?}", tx_hash))
     }
@@ -480,7 +452,6 @@ impl EthHttpCli {
         })
         .await?
     }
-
 
     // pub async fn get_account(&self, address: Address) -> Result<Account> {
     //     self.retry_with_backoff(|| async { self.inner[0].get_account(address).await })
@@ -501,8 +472,7 @@ impl EthHttpCli {
             })
             .await;
 
-        self.update_metrics("txpool_content", result.is_ok(), start.elapsed())
-            .await;
+        self.update_metrics("txpool_content", result.is_ok(), start.elapsed()).await;
 
         result.with_context(|| "Failed to get txpool content")
     }

@@ -7,8 +7,6 @@ use crate::{
     eth::{EthHttpCli, MempoolStatus, TxPoolContent},
 };
 
-
-
 /// Action to take after analyzing mempool status
 #[derive(Debug)]
 pub enum MempoolAction {
@@ -105,7 +103,9 @@ impl MempoolTracker {
 
     /// Identify accounts with nonce gaps from txpool_content
     /// Returns list of addresses that need correction
-    pub fn identify_problematic_accounts(content: &TxPoolContent) -> Vec<alloy::primitives::Address> {
+    pub fn identify_problematic_accounts(
+        content: &TxPoolContent,
+    ) -> Vec<alloy::primitives::Address> {
         let mut problematic_accounts = Vec::new();
 
         for (address, nonces) in &content.queued {
@@ -114,21 +114,17 @@ impl MempoolTracker {
             // We check if they also have pending transactions.
             // If they have NO pending transactions but HAVE queued, strictly implies a gap.
             let has_pending = content.pending.contains_key(address);
-            
+
             // Check if there are any valid nonces in queued
-             if nonces.keys().any(|s| s.parse::<u64>().is_ok()) {
+            if nonces.keys().any(|s| s.parse::<u64>().is_ok()) {
                 if !has_pending {
-                     problematic_accounts.push(*address);
+                    problematic_accounts.push(*address);
                 }
             }
         }
 
-        tracing::info!(
-            "Identified {} accounts with likely nonce gaps",
-            problematic_accounts.len()
-        );
+        tracing::info!("Identified {} accounts with likely nonce gaps", problematic_accounts.len());
 
         problematic_accounts
     }
 }
-

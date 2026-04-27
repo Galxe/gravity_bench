@@ -107,7 +107,6 @@ impl SamplingPolicy {
     }
 }
 
-
 impl BenchConfig {
     /// Load configuration from TOML file
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {

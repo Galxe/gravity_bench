@@ -4,10 +4,10 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     process::{Command, Output},
@@ -110,16 +110,10 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
     init_nonce_map: Arc<HashMap<Address, u64>>,
 ) -> Result<()> {
     let total_faucet_levels = faucet_builder.total_levels();
-    info!(
-        "{} faucet distribution will proceed in {} levels.",
-        faucet_name, total_faucet_levels
-    );
+    info!("{} faucet distribution will proceed in {} levels.", faucet_name, total_faucet_levels);
 
     for level in 0..total_faucet_levels {
-        info!(
-            "Starting {} faucet distribution for LEVEL {}...",
-            faucet_name, level
-        );
+        info!("Starting {} faucet distribution for LEVEL {}...", faucet_name, level);
 
         let faucet_level_plan =
             faucet_builder.create_plan_for_level(level, init_nonce_map.clone(), chain_id);
@@ -132,15 +126,9 @@ async fn execute_faucet_distribution<T: FaucetTxnBuilder + 'static>(
         if wait_duration_secs > 0 {
             tokio::time::sleep(std::time::Duration::from_secs(wait_duration_secs)).await;
         }
-        info!(
-            "{} faucet distribution for LEVEL {} completed successfully.",
-            faucet_name, level
-        );
+        info!("{} faucet distribution for LEVEL {} completed successfully.", faucet_name, level);
     }
-    info!(
-        "All {} faucet distribution levels are complete.",
-        faucet_name
-    );
+    info!("All {} faucet distribution levels are complete.", faucet_name);
     Ok(())
 }
 
@@ -170,10 +158,7 @@ async fn test_uniswap(
     let start_time = Instant::now();
     loop {
         if duration_secs > 0 && start_time.elapsed() >= Duration::from_secs(duration_secs) {
-            info!(
-                "Benchmark duration of {} seconds reached. Stopping.",
-                duration_secs
-            );
+            info!("Benchmark duration of {} seconds reached. Stopping.", duration_secs);
             break;
         }
         let plan = PlanBuilder::swap_token_to_token(
@@ -214,10 +199,7 @@ async fn test_erc20_transfer(
     let start_time = Instant::now();
     loop {
         if duration_secs > 0 && start_time.elapsed() >= Duration::from_secs(duration_secs) {
-            info!(
-                "Benchmark duration of {} seconds reached. Stopping.",
-                duration_secs
-            );
+            info!("Benchmark duration of {} seconds reached. Stopping.", duration_secs);
             break;
         }
         // bench erc20 transfer
@@ -265,10 +247,8 @@ async fn get_init_nonce_map(
     let mut init_nonce_map = accout_generator.init_nonce_map();
     let faucet_signer = PrivateKeySigner::from_str(faucet_private_key).unwrap();
     let faucet_address = faucet_signer.address();
-    init_nonce_map.insert(
-        faucet_address,
-        eth_client.get_pending_txn_count(faucet_address).await.unwrap(),
-    );
+    init_nonce_map
+        .insert(faucet_address, eth_client.get_pending_txn_count(faucet_address).await.unwrap());
     Arc::new(init_nonce_map)
 }
 
@@ -279,8 +259,7 @@ async fn start_bench() -> Result<()> {
 
     // Initialize tracing
     let log_path = benchmark_config.log_path.trim();
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let _guard = if log_path.is_empty() || log_path.eq_ignore_ascii_case("console") {
         // Console only
@@ -297,12 +276,17 @@ async fn start_bench() -> Result<()> {
         let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
         let file_stem = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("gravity_bench"));
         let extension = path.extension().unwrap_or_else(|| std::ffi::OsStr::new("log"));
-        
+
         // Ensure directory exists
         std::fs::create_dir_all(directory).unwrap();
 
         let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let new_filename = format!("{}.{}.{}", file_stem.to_string_lossy(), timestamp, extension.to_string_lossy());
+        let new_filename = format!(
+            "{}.{}.{}",
+            file_stem.to_string_lossy(),
+            timestamp,
+            extension.to_string_lossy()
+        );
         let full_path = directory.join(new_filename);
 
         let file = std::fs::File::create(&full_path).unwrap();
@@ -310,13 +294,9 @@ async fn start_bench() -> Result<()> {
 
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_ansi(false)
-            )
+            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
             .init();
-        
+
         println!("Logging to file: {:?}", full_path);
         Some(guard)
     };
@@ -331,7 +311,8 @@ async fn start_bench() -> Result<()> {
         let snapshot: Snapshot = serde_json::from_str(&snapshot_json).unwrap_or_else(|e| {
             panic!("Failed to parse snapshot.json: {}", e);
         });
-        let seed_bytes = hex::decode(snapshot.seed.trim()).expect("Invalid hex seed in snapshot.json");
+        let seed_bytes =
+            hex::decode(snapshot.seed.trim()).expect("Invalid hex seed in snapshot.json");
         let mut seed = [0u8; 32];
         seed.copy_from_slice(&seed_bytes);
         info!("Recovered faucet_start_nonce: {}", snapshot.faucet_start_nonce);
@@ -356,7 +337,7 @@ async fn start_bench() -> Result<()> {
         .unwrap_or_else(|e| {
             panic!("Contract config file not found {}", e);
         });
-        
+
         let seed: [u8; 32] = rand::random();
         (contract_config, seed, None)
     };
@@ -366,9 +347,8 @@ async fn start_bench() -> Result<()> {
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap(),
         seed,
     );
-    let account_ids = accout_generator
-        .gen_account(0, benchmark_config.accounts.num_accounts as u64)
-        .unwrap();
+    let account_ids =
+        accout_generator.gen_account(0, benchmark_config.accounts.num_accounts as u64).unwrap();
     let account_addresses = Arc::new({
         account_ids
             .iter()
@@ -388,7 +368,8 @@ async fn start_bench() -> Result<()> {
     let chain_id = benchmark_config.nodes[0].chain_id;
 
     info!("Initializing Faucet constructor...");
-    let faucet_address = PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
+    let faucet_address =
+        PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
     let on_chain_nonce = eth_clients[0].get_pending_txn_count(faucet_address).await.unwrap();
     // In recover mode, use the saved start_nonce so that the skip logic
     // correctly identifies already-completed Level 0 transactions.
@@ -398,10 +379,7 @@ async fn start_bench() -> Result<()> {
 
     // Save snapshot in normal mode (after we know the start_nonce)
     if !args.recover {
-        let snapshot = Snapshot {
-            seed: hex::encode(seed),
-            faucet_start_nonce: start_nonce,
-        };
+        let snapshot = Snapshot { seed: hex::encode(seed), faucet_start_nonce: start_nonce };
         let snapshot_json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write("snapshot.json", &snapshot_json).unwrap_or_else(|e| {
             panic!("Failed to write snapshot.json: {}", e);
@@ -464,21 +442,17 @@ async fn start_bench() -> Result<()> {
     let address_pool: Arc<dyn AddressPool> = match benchmark_config.address_pool_type {
         config::AddressPoolType::Random => {
             info!("Using RandomAddressPool");
-            Arc::new(
-                txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(
-                    account_ids.clone(),
-                    account_manager.clone(),
-                ),
-            )
+            Arc::new(txn_plan::addr_pool::managed_address_pool::RandomAddressPool::new(
+                account_ids.clone(),
+                account_manager.clone(),
+            ))
         }
         config::AddressPoolType::Weighted => {
             info!("Using WeightedAddressPool");
-            Arc::new(
-                txn_plan::addr_pool::weighted_address_pool::WeightedAddressPool::new(
-                    account_ids.clone(),
-                    account_manager.clone(),
-                ),
-            )
+            Arc::new(txn_plan::addr_pool::weighted_address_pool::WeightedAddressPool::new(
+                account_ids.clone(),
+                account_manager.clone(),
+            ))
         }
     };
 
@@ -503,15 +477,10 @@ async fn start_bench() -> Result<()> {
     )
     .await;
 
-    let producer = Producer::new(
-        address_pool.clone(),
-        consumer,
-        monitor,
-        account_manager.clone(),
-    )
-    .await
-    .unwrap()
-    .start();
+    let producer = Producer::new(address_pool.clone(), consumer, monitor, account_manager.clone())
+        .await
+        .unwrap()
+        .start();
     execute_faucet_distribution(
         eth_faucet_builder,
         chain_id,
@@ -543,26 +512,12 @@ async fn start_bench() -> Result<()> {
     let duration_secs = benchmark_config.performance.duration_secs;
     if benchmark_config.enable_swap_token {
         info!("bench uniswap");
-        test_uniswap(
-            address_pool,
-            chain_id,
-            contract_config,
-            &producer,
-            tps,
-            duration_secs,
-        )
-        .await?;
+        test_uniswap(address_pool, chain_id, contract_config, &producer, tps, duration_secs)
+            .await?;
     } else {
         info!("bench erc20 transfer");
-        test_erc20_transfer(
-            address_pool,
-            chain_id,
-            contract_config,
-            &producer,
-            tps,
-            duration_secs,
-        )
-        .await?;
+        test_erc20_transfer(address_pool, chain_id, contract_config, &producer, tps, duration_secs)
+            .await?;
     }
     Ok(())
 }
@@ -618,10 +573,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         }
     });
 
-    stream::iter(tasks)
-        .buffer_unordered(1024)
-        .collect::<Vec<_>>()
-        .await;
+    stream::iter(tasks).buffer_unordered(1024).collect::<Vec<_>>().await;
 
     pb.finish_with_message("Done");
     let elapsed = start_time.elapsed();
@@ -669,9 +621,7 @@ async fn main() -> Result<()> {
     };
     let res = async { start_bench().await };
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install CTRL+C signal handler");
+        tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C signal handler");
         println!("Received Ctrl+C, saving heap profile...");
     };
     tokio::select! {

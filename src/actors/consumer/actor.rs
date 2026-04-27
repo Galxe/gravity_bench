@@ -124,10 +124,7 @@ impl RateLimiter {
 
     /// Get current status
     pub fn get_status(&self) -> (u32, u32) {
-        (
-            self.current_tokens.load(Ordering::Relaxed) as u32,
-            self.bucket_capacity,
-        )
+        (self.current_tokens.load(Ordering::Relaxed) as u32, self.bucket_capacity)
     }
 }
 
@@ -199,10 +196,7 @@ impl Consumer {
         transactions_sending: Arc<AtomicU64>,
     ) {
         let metadata = signed_txn.metadata;
-        debug!(
-            "Acquired permit, processing transaction: {:?}",
-            metadata.txn_id
-        );
+        debug!("Acquired permit, processing transaction: {:?}", metadata.txn_id);
         transactions_sending.fetch_add(1, Ordering::Relaxed);
 
         let mut last_error: Option<anyhow::Error> = None;
@@ -215,10 +209,7 @@ impl Consumer {
                 MAX_RETRIES,
                 metadata.txn_id
             );
-            match dispatcher
-                .send_tx(signed_txn.bytes.clone(), metadata.txn_id)
-                .await
-            {
+            match dispatcher.send_tx(signed_txn.bytes.clone(), metadata.txn_id).await {
                 // Transaction sent successfully
                 Ok((tx_hash, rpc_url)) => {
                     tracing::debug!(
@@ -320,22 +311,22 @@ impl Consumer {
                     {
                         // The RPC already told us "nonce too low" - trust this directly.
                         // Try to get current nonce for better logging, but don't fail if we can't.
-                        let (expect_nonce, actual_nonce, from_account) = 
-                            if let Ok(next_nonce) = dispatcher
+                        let (expect_nonce, actual_nonce, from_account) = if let Ok(next_nonce) =
+                            dispatcher
                                 .provider(&url)
                                 .await
                                 .unwrap()
                                 .get_pending_txn_count(metadata.from_account.as_ref().clone())
                                 .await
-                            {
-                                (next_nonce, metadata.nonce, metadata.from_account.clone())
-                            } else {
-                                // Failed to get nonce, but RPC already said "nonce too low"
-                                // Use 0 as placeholder - the important thing is NOT to retry
-                                warn!("Nonce too low but failed to get current nonce for {:?}, treating as resolved", metadata.txn_id);
-                                (0, metadata.nonce, metadata.from_account.clone())
-                            };
-                        
+                        {
+                            (next_nonce, metadata.nonce, metadata.from_account.clone())
+                        } else {
+                            // Failed to get nonce, but RPC already said "nonce too low"
+                            // Use 0 as placeholder - the important thing is NOT to retry
+                            warn!("Nonce too low but failed to get current nonce for {:?}, treating as resolved", metadata.txn_id);
+                            (0, metadata.nonce, metadata.from_account.clone())
+                        };
+
                         monitor_addr.do_send(UpdateSubmissionResult {
                             metadata,
                             result: Arc::new(SubmissionResult::NonceTooLow {
@@ -348,7 +339,7 @@ impl Consumer {
                             send_time: Instant::now(),
                             signed_bytes: Arc::new(signed_txn.bytes.clone()),
                         });
-                        
+
                         // After encountering Nonce error, should stop retrying and return regardless
                         transactions_sending.fetch_sub(1, Ordering::Relaxed);
                         return;
@@ -394,13 +385,7 @@ impl Consumer {
         max_tps: Option<u32>,
     ) -> Consumer {
         let dispatcher = Arc::new(SimpleDispatcher::new(providers));
-        Consumer::new(
-            dispatcher,
-            max_concurrent_senders,
-            monitor_addr,
-            max_pool_size,
-            max_tps,
-        )
+        Consumer::new(dispatcher, max_concurrent_senders, monitor_addr, max_pool_size, max_tps)
     }
 
     /// Start transaction pool consumer
@@ -420,7 +405,7 @@ impl Consumer {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                info!("Transaction pool consumer started with JoinSet and rate limiting (max_tps: {}).", 
+                info!("Transaction pool consumer started with JoinSet and rate limiting (max_tps: {}).",
                       if rate_limiter.max_tps == 0 { "unlimited".to_string() } else { rate_limiter.max_tps.to_string() });
                 let mut in_flight_tasks = tokio::task::JoinSet::new();
 
@@ -502,9 +487,7 @@ impl Actor for Consumer {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         // Register self with Monitor
-        self.monitor_addr.do_send(RegisterConsumer {
-            addr: ctx.address(),
-        });
+        self.monitor_addr.do_send(RegisterConsumer { addr: ctx.address() });
 
         let rate_limiter = self.rate_limiter.clone();
         let dispatcher = self.dispatcher.clone();
@@ -588,10 +571,8 @@ impl Handler<RetryTxn> for Consumer {
         debug!("Retrying transaction: {:?}", msg.metadata.txn_id);
 
         // Convert to SignedTxnWithMetadata and send through normal channel
-        let signed_txn = SignedTxnWithMetadata {
-            bytes: (*msg.signed_bytes).clone(),
-            metadata: msg.metadata,
-        };
+        let signed_txn =
+            SignedTxnWithMetadata { bytes: (*msg.signed_bytes).clone(), metadata: msg.metadata };
 
         let sender = self.pool_sender.clone();
         let pool_size = self.stats.pool_size.clone();

@@ -107,22 +107,14 @@ impl ContractConfig {
     #[allow(unused)]
     pub fn get_weth_address(&self) -> anyhow::Result<Address> {
         Address::from_str(
-            &self
-                .addresses
-                .weth9
-                .as_ref()
-                .unwrap_or_else(|| panic!("WETH address not found")),
+            &self.addresses.weth9.as_ref().unwrap_or_else(|| panic!("WETH address not found")),
         )
         .map_err(|e| anyhow::anyhow!("Invalid WETH address: {}", e))
     }
 
     /// Get all token addresses
     pub fn get_all_token(&self) -> Vec<Token> {
-        self.addresses
-            .tokens
-            .iter()
-            .map(|token| token.clone())
-            .collect()
+        self.addresses.tokens.iter().map(|token| token.clone()).collect()
     }
 
     pub fn get_all_token_addresses(&self) -> Vec<Address> {

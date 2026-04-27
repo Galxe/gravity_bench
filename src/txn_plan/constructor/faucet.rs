@@ -139,9 +139,7 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
             for level in &account_levels {
                 for acc in level {
                     let address = account_generator.get_address_by_id(*acc);
-                    nonce_map
-                        .entry(address)
-                        .or_insert_with(|| Arc::new(AtomicU64::new(0)));
+                    nonce_map.entry(address).or_insert_with(|| Arc::new(AtomicU64::new(0)));
                 }
             }
         }

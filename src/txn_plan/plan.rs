@@ -107,10 +107,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                             let tx_envelope =
                                 TxnBuilder::build_and_sign_transaction(tx_request, &signer)
                                     .unwrap();
-                            SignedTxnWithMetadata {
-                                bytes: tx_envelope.encoded_2718(),
-                                metadata,
-                            }
+                            SignedTxnWithMetadata { bytes: tx_envelope.encoded_2718(), metadata }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -124,10 +121,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
             handle.await.unwrap();
         });
 
-        Ok(TxnIter {
-            iterator: rx,
-            consume_nonce: true,
-        })
+        Ok(TxnIter { iterator: rx, consume_nonce: true })
     }
 }
 
@@ -214,7 +208,7 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                                         from_account: Arc::new(
                                             account_generator.get_address_by_id(from_account_id),
                                         ),
-                                        from_account_id: from_account_id,
+                                        from_account_id,
                                         nonce: 0,
                                         txn_id: Uuid::new_v4(),
                                         plan_id: plan_id.clone(),
@@ -239,9 +233,6 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
             handle.await.unwrap();
         });
 
-        Ok(TxnIter {
-            iterator: rx,
-            consume_nonce: false,
-        })
+        Ok(TxnIter { iterator: rx, consume_nonce: false })
     }
 }

@@ -51,10 +51,8 @@ impl Dispatcher for SimpleDispatcher {
     ) -> std::result::Result<(TxHash, String), (anyhow::Error, String)> {
         let provider = self.select_provider(txn_id);
         let rpc_url = provider.rpc().as_ref().clone();
-        let tx_hash = provider
-            .send_raw_tx(bytes)
-            .await
-            .map_err(|e| (e, provider.rpc().as_ref().clone()))?;
+        let tx_hash =
+            provider.send_raw_tx(bytes).await.map_err(|e| (e, provider.rpc().as_ref().clone()))?;
 
         Ok((tx_hash, rpc_url))
     }
