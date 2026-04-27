@@ -127,81 +127,65 @@ impl<T: FaucetTxnBuilder + 'static> TxnPlan for LevelFaucetPlan<T> {
         let txn_builder = self.txn_builder.clone();
         let account_init_nonce = self.account_init_nonce.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            senders
-                .chunks(1024)
-                .enumerate()
-                .for_each(|(chunk_index, chunk)| {
-                    chunk.into_par_iter().enumerate().for_each(
-                        |(sender_index, sender_signer_id)| {
-                            let sender_signer =
-                                account_generator.get_signer_by_id(*sender_signer_id);
-                            let start_index = (chunk_index * 1024 + sender_index) * degree;
-                            let end_index = (start_index + degree).min(final_recipients.len());
-                            if end_index < start_index {
-                                return;
-                            }
-                            for i in start_index..end_index {
-                                let (to_address, value) = if is_final_level {
-                                    let to = final_recipients[i].clone();
-                                    let val = amount_per_recipient;
-                                    (to, val)
-                                } else {
-                                    let to_id = account_levels[level][i];
-                                    let to = account_generator.get_address_by_id(to_id);
-                                    let val = intermediate_funding_amounts[level];
-                                    (Arc::new(to), val)
-                                };
-                                let nonce_map_guard = nonce_map.lock().unwrap();
-                                let nonce = nonce_map_guard
-                                    .get(&sender_signer.address())
-                                    .unwrap()
-                                    .fetch_add(1, Ordering::Relaxed);
-                                let init_nonce = account_init_nonce
-                                    .get(&sender_signer.address())
-                                    .unwrap_or(&0);
-                                // Skip transaction if it was already executed (recovery mode).
-                                // In normal mode, init_nonce is 0 for all accounts, so nothing is skipped.
-                                // In recovery mode, init_nonce is the on-chain nonce, so we skip if init_nonce > nonce.
-                                if *init_nonce > nonce && init_nonce != &0 {
-                                    continue;
-                                }
-                                let tx_request = txn_builder.build_faucet_txn(
-                                    *to_address,
-                                    value,
-                                    nonce,
-                                    chain_id,
-                                );
-                                let tx_envelope = TxnBuilder::build_and_sign_transaction(
-                                    tx_request,
-                                    &sender_signer,
-                                )
+            senders.chunks(1024).enumerate().for_each(|(chunk_index, chunk)| {
+                chunk.into_par_iter().enumerate().for_each(|(sender_index, sender_signer_id)| {
+                    let sender_signer = account_generator.get_signer_by_id(*sender_signer_id);
+                    let start_index = (chunk_index * 1024 + sender_index) * degree;
+                    let end_index = (start_index + degree).min(final_recipients.len());
+                    if end_index < start_index {
+                        return;
+                    }
+                    for i in start_index..end_index {
+                        let (to_address, value) = if is_final_level {
+                            let to = final_recipients[i].clone();
+                            let val = amount_per_recipient;
+                            (to, val)
+                        } else {
+                            let to_id = account_levels[level][i];
+                            let to = account_generator.get_address_by_id(to_id);
+                            let val = intermediate_funding_amounts[level];
+                            (Arc::new(to), val)
+                        };
+                        let nonce_map_guard = nonce_map.lock().unwrap();
+                        let nonce = nonce_map_guard
+                            .get(&sender_signer.address())
+                            .unwrap()
+                            .fetch_add(1, Ordering::Relaxed);
+                        let init_nonce =
+                            account_init_nonce.get(&sender_signer.address()).unwrap_or(&0);
+                        // Skip transaction if it was already executed (recovery mode).
+                        // In normal mode, init_nonce is 0 for all accounts, so nothing is skipped.
+                        // In recovery mode, init_nonce is the on-chain nonce, so we skip if init_nonce > nonce.
+                        if *init_nonce > nonce && init_nonce != &0 {
+                            continue;
+                        }
+                        let tx_request =
+                            txn_builder.build_faucet_txn(*to_address, value, nonce, chain_id);
+                        let tx_envelope =
+                            TxnBuilder::build_and_sign_transaction(tx_request, &sender_signer)
                                 .unwrap();
-                                let metadata = Arc::new(TxnMetadata {
-                                    from_account: Arc::new(sender_signer.address()),
-                                    nonce,
-                                    from_account_id: *sender_signer_id,
-                                    txn_id: Uuid::new_v4(),
-                                    plan_id: plan_id.clone(),
-                                });
+                        let metadata = Arc::new(TxnMetadata {
+                            from_account: Arc::new(sender_signer.address()),
+                            nonce,
+                            from_account_id: *sender_signer_id,
+                            txn_id: Uuid::new_v4(),
+                            plan_id: plan_id.clone(),
+                        });
 
-                                tx.send(SignedTxnWithMetadata {
-                                    bytes: tx_envelope.encoded_2718(),
-                                    metadata,
-                                })
-                                .unwrap();
-                            }
-                        },
-                    )
-                });
+                        tx.send(SignedTxnWithMetadata {
+                            bytes: tx_envelope.encoded_2718(),
+                            metadata,
+                        })
+                        .unwrap();
+                    }
+                })
+            });
             drop(tx);
         });
         tokio::spawn(async move {
             handle.await.unwrap();
         });
 
-        Ok(TxnIter {
-            iterator: rx,
-            consume_nonce: false,
-        })
+        Ok(TxnIter { iterator: rx, consume_nonce: false })
     }
 }

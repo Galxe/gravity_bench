@@ -12,11 +12,11 @@ use crate::actors::producer::Producer;
 use crate::eth::EthHttpCli;
 use crate::txn_plan::PlanId;
 
-use super::txn_tracker::{BackpressureAction, PlanStatus, TxnTracker};
 use super::mempool_tracker::MempoolAction;
+use super::txn_tracker::{BackpressureAction, PlanStatus, TxnTracker};
 use super::{
-    PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer,
-    ReportProducerStats, RetryTxn, Tick, UpdateSubmissionResult, CorrectNonces,
+    CorrectNonces, PlanCompleted, PlanFailed, RegisterConsumer, RegisterPlan, RegisterProducer,
+    ReportProducerStats, RetryTxn, Tick, UpdateSubmissionResult,
 };
 use crate::actors::{PauseProducer, ResumeProducer};
 
@@ -30,7 +30,7 @@ struct LogStats;
 pub struct Monitor {
     /// Registered Producer address
     producer_addr: Option<Addr<Producer>>,
-    /// Registered Consumer address  
+    /// Registered Consumer address
     consumer_addr: Option<Addr<Consumer>>,
     /// Transaction and plan tracker
     txn_tracker: TxnTracker,
@@ -39,7 +39,6 @@ pub struct Monitor {
 }
 
 impl Monitor {
-
     pub fn new_with_clients(
         clients: Vec<std::sync::Arc<EthHttpCli>>,
         max_pool_size: usize,
@@ -50,12 +49,7 @@ impl Monitor {
             consumer_addr: None,
             txn_tracker: TxnTracker::new(clients.clone(), sampling_policy),
             mempool_tracker: MempoolTracker::new(max_pool_size),
-            clients: Arc::new(
-                clients
-                    .into_iter()
-                    .map(|client| (client.rpc(), client))
-                    .collect(),
-            ),
+            clients: Arc::new(clients.into_iter().map(|client| (client.rpc(), client)).collect()),
         }
     }
 
@@ -102,7 +96,7 @@ impl Actor for Monitor {
                             match act.mempool_tracker.process_pool_status(res, producer_addr) {
                                 Ok((pending, queued, action)) => {
                                     act.txn_tracker.update_mempool_stats(pending, queued);
-                                    
+
                                     // Handle nonce correction if needed
                                     if matches!(action, MempoolAction::NeedsNonceCorrection) {
                                         let clients = act.clients.clone();
@@ -200,24 +194,27 @@ impl Handler<UpdateSubmissionResult> for Monitor {
                 // If the transaction failed submission, retry it endlessly to prevent nonce gaps
                 // and premature plan completion. Do NOT tell TxnTracker about the failure yet.
                 tracing::warn!(
-                    "Transaction failed submission (ErrorWithRetry). Retrying via Consumer. plan_id={}, tx_hash={:?}", 
+                    "Transaction failed submission (ErrorWithRetry). Retrying via Consumer. plan_id={}, tx_hash={:?}",
                     msg.metadata.plan_id,
                     msg.metadata.txn_id
                 );
-                
+
                 if let Some(consumer) = &self.consumer_addr {
                     consumer.do_send(RetryTxn {
                         signed_bytes: msg.signed_bytes.clone(),
                         metadata: msg.metadata.clone(),
                     });
                 } else {
-                    tracing::error!("Cannot retry transaction, no consumer address: {:?}", msg.metadata.txn_id);
+                    tracing::error!(
+                        "Cannot retry transaction, no consumer address: {:?}",
+                        msg.metadata.txn_id
+                    );
                     // Fallback to tracker if no consumer (will mark as failed)
                     self.txn_tracker.handle_submission_result(&msg);
                 }
             }
             _ => {
-                 self.txn_tracker.handle_submission_result(&msg);
+                self.txn_tracker.handle_submission_result(&msg);
             }
         }
     }
@@ -246,24 +243,20 @@ impl Handler<Tick> for Monitor {
         let tasks = self.txn_tracker.perform_sampling_check();
         let consumer_addr = self.consumer_addr.clone();
         if !tasks.is_empty() {
-            ctx.spawn(
-                future::join_all(tasks)
-                    .into_actor(self)
-                    .map(move |results, act, _ctx| {
-                        // Process results and get retry queue
-                        let retry_queue = act.txn_tracker.handle_receipt_result(results);
+            ctx.spawn(future::join_all(tasks).into_actor(self).map(move |results, act, _ctx| {
+                // Process results and get retry queue
+                let retry_queue = act.txn_tracker.handle_receipt_result(results);
 
-                        // 3. Send retries to consumer
-                        if let Some(consumer) = &consumer_addr {
-                            for retry_txn in retry_queue {
-                                consumer.do_send(RetryTxn {
-                                    signed_bytes: retry_txn.signed_bytes,
-                                    metadata: retry_txn.metadata,
-                                });
-                            }
-                        }
-                    }),
-            );
+                // 3. Send retries to consumer
+                if let Some(consumer) = &consumer_addr {
+                    for retry_txn in retry_queue {
+                        consumer.do_send(RetryTxn {
+                            signed_bytes: retry_txn.signed_bytes,
+                            metadata: retry_txn.metadata,
+                        });
+                    }
+                }
+            }));
         }
 
         // Check completion status of all plans
@@ -301,8 +294,7 @@ impl Handler<ProduceTxns> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: ProduceTxns, _ctx: &mut Self::Context) {
-        self.txn_tracker
-            .handler_produce_txns(msg.plan_id, msg.count);
+        self.txn_tracker.handler_produce_txns(msg.plan_id, msg.count);
     }
 }
 
@@ -310,8 +302,7 @@ impl Handler<PlanProduced> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: PlanProduced, _ctx: &mut Self::Context) {
-        self.txn_tracker
-            .handle_plan_produced(msg.plan_id, msg.count);
+        self.txn_tracker.handle_plan_produced(msg.plan_id, msg.count);
     }
 }
 
@@ -319,8 +310,7 @@ impl Handler<ReportProducerStats> for Monitor {
     type Result = ();
 
     fn handle(&mut self, msg: ReportProducerStats, _ctx: &mut Self::Context) {
-        self.txn_tracker
-            .update_producer_stats(msg.ready_accounts, msg.sending_txns);
+        self.txn_tracker.update_producer_stats(msg.ready_accounts, msg.sending_txns);
     }
 }
 

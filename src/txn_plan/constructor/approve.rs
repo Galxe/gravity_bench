@@ -23,11 +23,7 @@ pub struct ApproveTokenConstructor {
 
 impl ApproveTokenConstructor {
     pub fn new(chain_id: u64, token_address: Address, spender_address: Address) -> Self {
-        Self {
-            chain_id,
-            token_address,
-            spender_address,
-        }
+        Self { chain_id, token_address, spender_address }
     }
 }
 
@@ -38,10 +34,7 @@ impl FromTxnConstructor for ApproveTokenConstructor {
         account_generator: AccountManager,
         nonce: u64,
     ) -> Result<TransactionRequest, anyhow::Error> {
-        let approve_call = IERC20::approveCall {
-            spender: self.spender_address,
-            amount: U256::MAX,
-        };
+        let approve_call = IERC20::approveCall { spender: self.spender_address, amount: U256::MAX };
 
         let call_data = approve_call.abi_encode();
         let call_data = Bytes::from(call_data);

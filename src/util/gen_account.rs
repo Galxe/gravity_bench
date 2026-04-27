@@ -27,11 +27,7 @@ pub struct AccountSignerCache {
 
 impl AccountSignerCache {
     pub(crate) fn new(size: usize, seed: [u8; 32]) -> Self {
-        Self {
-            signers: Vec::with_capacity(size),
-            size,
-            seed,
-        }
+        Self { signers: Vec::with_capacity(size), size, seed }
     }
 
     pub(crate) fn save_signer(&mut self, signer: PrivateKeySigner, account_id: AccountId) {
@@ -124,9 +120,7 @@ impl AccountGenerator {
     }
 
     pub fn accouts_nonce_iter(&self) -> impl Iterator<Item = (&Address, Arc<AtomicU64>)> {
-        self.accout_addresses
-            .iter()
-            .zip(self.init_nonces.iter().cloned())
+        self.accout_addresses.iter().zip(self.init_nonces.iter().cloned())
     }
 
     pub fn account_ids_with_nonce(&self) -> impl Iterator<Item = (AccountId, Arc<AtomicU64>)> + '_ {
@@ -148,8 +142,7 @@ impl AccountGenerator {
                 self.address_to_id.insert(addr, account_id);
                 self.accout_signers.save_signer(signer.clone(), account_id);
             }
-            self.init_nonces
-                .extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
+            self.init_nonces.extend((0..size).map(|_| Arc::new(AtomicU64::new(0))));
         }
         let mut res = Vec::with_capacity(size as usize);
         for i in 0..size {
@@ -326,13 +319,12 @@ mod tests {
         // Generate accounts
         let faucet_pk = "";
         let faucet_bytes = hex::decode(faucet_pk).expect("invalid faucet private key hex");
-        let faucet_signer = PrivateKeySigner::from_slice(&faucet_bytes)
-            .expect("failed to create faucet signer");
+        let faucet_signer =
+            PrivateKeySigner::from_slice(&faucet_bytes).expect("failed to create faucet signer");
 
         let mut generator = AccountGenerator::with_capacity(faucet_signer.clone(), [0u8; 32]);
-        let account_ids = generator
-            .gen_account(0, num_accounts)
-            .expect("failed to generate accounts");
+        let account_ids =
+            generator.gen_account(0, num_accounts).expect("failed to generate accounts");
 
         // Connect to RPC
         let eth_client = EthHttpCli::new(rpc_url, chain_id)
@@ -344,10 +336,8 @@ mod tests {
 
         // Check faucet balance
         let faucet_address = faucet_signer.address();
-        let faucet_balance = eth_client
-            .get_balance(&faucet_address)
-            .await
-            .expect("failed to get faucet balance");
+        let faucet_balance =
+            eth_client.get_balance(&faucet_address).await.expect("failed to get faucet balance");
         println!(
             "Faucet  : {:?}  balance = {} wei ({} ETH)",
             faucet_address,
@@ -396,9 +386,8 @@ mod tests {
 
         // Generate accounts
         let mut generator = AccountGenerator::with_capacity(faucet_signer.clone(), [0u8; 32]);
-        let account_ids = generator
-            .gen_account(0, num_accounts)
-            .expect("failed to generate accounts");
+        let account_ids =
+            generator.gen_account(0, num_accounts).expect("failed to generate accounts");
 
         // Connect to RPC
         let eth_client =
@@ -424,14 +413,9 @@ mod tests {
                     .expect("failed to build tx request");
             let tx_envelope = TxnBuilder::build_and_sign_transaction(tx_request, &faucet_signer)
                 .expect("failed to sign tx");
-            let tx_hash = eth_client
-                .send_tx_envelope(tx_envelope)
-                .await
-                .expect("failed to send tx");
-            println!(
-                "ID {:>6}: {:?}  tx = {:?}",
-                id.0, to, tx_hash,
-            );
+            let tx_hash =
+                eth_client.send_tx_envelope(tx_envelope).await.expect("failed to send tx");
+            println!("ID {:>6}: {:?}  tx = {:?}", id.0, to, tx_hash,);
             nonce += 1;
         }
 
@@ -443,16 +427,8 @@ mod tests {
         println!("\n=== Balances after faucet ===");
         for &id in &account_ids {
             let address = generator.get_address_by_id(id);
-            let balance = eth_client
-                .get_balance(&address)
-                .await
-                .expect("failed to get balance");
-            println!(
-                "ID {:>6}: {:?}  balance = {} ETH",
-                id.0,
-                address,
-                format_eth(balance),
-            );
+            let balance = eth_client.get_balance(&address).await.expect("failed to get balance");
+            println!("ID {:>6}: {:?}  balance = {} ETH", id.0, address, format_eth(balance),);
         }
         println!("Done.");
     }

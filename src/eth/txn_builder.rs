@@ -26,10 +26,7 @@ impl TxnBuilder {
         tx_request: TransactionRequest,
         signer: &PrivateKeySigner,
     ) -> Result<TxEnvelope> {
-        debug!(
-            "Building and signing transaction with request: {:?}",
-            tx_request
-        );
+        debug!("Building and signing transaction with request: {:?}", tx_request);
         debug!("Signer address: {:?}", signer.address());
         let mut unsigned_tx = tx_request.build_unsigned().unwrap();
         let sig = signer.sign_transaction_sync(&mut unsigned_tx)?;

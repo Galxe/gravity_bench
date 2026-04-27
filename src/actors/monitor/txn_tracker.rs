@@ -3,7 +3,6 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-
 use alloy::primitives::TxHash;
 use comfy_table::{presets::UTF8_FULL, Cell, Table};
 use tracing::{debug, error, warn};
@@ -15,7 +14,6 @@ use crate::txn_plan::{PlanId, TxnMetadata};
 use crate::config::SamplingPolicy;
 
 use super::UpdateSubmissionResult;
-
 
 const TXN_TIMEOUT: Duration = Duration::from_secs(600); // 10 minutes timeout
 const TPS_WINDOW: Duration = Duration::from_secs(17);
@@ -91,7 +89,7 @@ struct PlanTracker {
     plan_failed_production: bool,
 
     plan_name: String,
-    
+
     /// Set of transaction hashes that have been resolved to avoid double counting
     resolved_hashes: HashSet<TxHash>,
 }
@@ -128,9 +126,7 @@ impl Ord for PendingTxInfo {
     /// 1. Primarily sorted by submission time (`submit_time`) in ascending order
     /// 2. If submission times are the same, sort by transaction hash (`tx_hash`) to ensure uniqueness
     fn cmp(&self, other: &Self) -> Ordering {
-        self.submit_time
-            .cmp(&other.submit_time)
-            .then_with(|| self.tx_hash.cmp(&other.tx_hash))
+        self.submit_time.cmp(&other.submit_time).then_with(|| self.tx_hash.cmp(&other.tx_hash))
     }
 }
 
@@ -204,10 +200,7 @@ impl TxnTracker {
         let current = self.pending_txns.len();
         if current >= MAX_PENDING_TXNS && !self.producer_paused_by_pending {
             self.producer_paused_by_pending = true;
-            warn!(
-                "Pending txns {} >= {}, pausing producer",
-                current, MAX_PENDING_TXNS
-            );
+            warn!("Pending txns {} >= {}, pausing producer", current, MAX_PENDING_TXNS);
             BackpressureAction::Pause
         } else if current < BACKPRESSURE_RESUME_THRESHOLD && self.producer_paused_by_pending {
             self.producer_paused_by_pending = false;
@@ -234,8 +227,11 @@ impl TxnTracker {
             tracker.plan_produced = true;
             // Force sync produced transactions count to catch up any lagging messages
             if tracker.produce_transactions != count {
-                 warn!("PlanProduced sync: plan {} count adjusted from {} to source-of-truth {}", plan_id, tracker.produce_transactions, count);
-                 tracker.produce_transactions = count; 
+                warn!(
+                    "PlanProduced sync: plan {} count adjusted from {} to source-of-truth {}",
+                    plan_id, tracker.produce_transactions, count
+                );
+                tracker.produce_transactions = count;
             }
         }
     }
@@ -243,10 +239,7 @@ impl TxnTracker {
     /// Register new plan (or update existing one if retried)
     pub fn register_plan(&mut self, plan_id: PlanId, plan_name: String) {
         if let Some(tracker) = self.plan_trackers.get_mut(&plan_id) {
-            debug!(
-                "Plan already registered (likely retry): plan_id={}. Resetting flags.",
-                plan_id
-            );
+            debug!("Plan already registered (likely retry): plan_id={}. Resetting flags.", plan_id);
             // Result of retry logic: we are producing more transactions for this plan.
             // Reset flags to keep plan open until the new attempt finishes.
             tracker.plan_produced = false;
@@ -282,7 +275,12 @@ impl TxnTracker {
     pub fn handle_submission_result(&mut self, msg: &UpdateSubmissionResult) {
         let plan_id = &msg.metadata.plan_id;
         if !self.plan_trackers.contains_key(plan_id) {
-            warn!("Plan not found: plan_id={}, tx_hash={:?}, result={:?}", plan_id, msg.result, msg.result.as_ref());
+            warn!(
+                "Plan not found: plan_id={}, tx_hash={:?}, result={:?}",
+                plan_id,
+                msg.result,
+                msg.result.as_ref()
+            );
             return;
         }
         let plan_tracker = self.plan_trackers.get_mut(plan_id).unwrap();
@@ -306,12 +304,7 @@ impl TxnTracker {
                 // Insert transaction into the global, time-sorted BTreeSet
                 self.pending_txns.insert(pending_info);
             }
-            SubmissionResult::NonceTooLow {
-                tx_hash,
-                expect_nonce,
-                actual_nonce,
-                from_account,
-            } => {
+            SubmissionResult::NonceTooLow { tx_hash, expect_nonce, actual_nonce, from_account } => {
                 let pending_info = PendingTxInfo {
                     tx_hash: *tx_hash,
                     metadata: msg.metadata.clone(),
@@ -326,15 +319,15 @@ impl TxnTracker {
                 );
             }
             e => {
-                warn!(
-                    "Transaction submission failed: plan_id={}, error={:?}",
-                    plan_id, e
-                );
+                warn!("Transaction submission failed: plan_id={}, error={:?}", plan_id, e);
                 if let Some(tracker) = self.plan_trackers.get_mut(plan_id) {
                     tracker.resolved_transactions += 1;
                     tracker.failed_submissions += 1;
                     self.total_failed_submissions += 1;
-                    warn!("Incrementing failed_submissions for plan {}: resolved={}, failed={}", plan_id, tracker.resolved_transactions, tracker.failed_submissions);
+                    warn!(
+                        "Incrementing failed_submissions for plan {}: resolved={}, failed={}",
+                        plan_id, tracker.resolved_transactions, tracker.failed_submissions
+                    );
                     self.resolved_txn_timestamps.push_back(Instant::now());
                     self.total_resolved_transactions += 1;
                 }
@@ -366,10 +359,10 @@ impl TxnTracker {
         }
         if let PlanStatus::Completed = status {
             if let Some(completed_tracker) = self.plan_trackers.remove(plan_id) {
-                warn!("Removing completed plan {}: produced={}, resolved={}, consumed={}, failed_sub={}, failed_exec={}", 
-                    plan_id, 
-                    completed_tracker.produce_transactions, 
-                    completed_tracker.resolved_transactions, 
+                warn!("Removing completed plan {}: produced={}, resolved={}, consumed={}, failed_sub={}, failed_exec={}",
+                    plan_id,
+                    completed_tracker.produce_transactions,
+                    completed_tracker.resolved_transactions,
                     completed_tracker.consumed_transactions,
                     completed_tracker.failed_submissions,
                     completed_tracker.failed_executions
@@ -406,7 +399,8 @@ impl TxnTracker {
 
         // --- Core sampling logic ---
         // Filter out transactions that are already being checked
-        let candidates: Vec<_> = self.pending_txns
+        let candidates: Vec<_> = self
+            .pending_txns
             .iter()
             .filter(|info| !self.inflight_checks.contains(&info.tx_hash))
             .cloned()
@@ -446,14 +440,9 @@ impl TxnTracker {
 
                 let task = async move {
                     let result = client.get_transaction_receipt(task_info.tx_hash).await;
-                    let account = client
-                        .get_latest_txn_count(task_info.metadata.from_account.as_ref())
-                        .await;
-                    tracing::debug!(
-                        "checked tx_hash={:?} result={:?}",
-                        task_info.tx_hash,
-                        result
-                    );
+                    let account =
+                        client.get_latest_txn_count(task_info.metadata.from_account.as_ref()).await;
+                    tracing::debug!("checked tx_hash={:?} result={:?}", task_info.tx_hash, result);
                     (task_info, account, result)
                 };
                 tasks.push(task);
@@ -500,26 +489,18 @@ impl TxnTracker {
                 }
                 Err(e) => {
                     // RPC query failed
-                    warn!(
-                        "Failed to get receipt for tx_hash={:?}: {}",
-                        info.tx_hash, e
-                    );
+                    warn!("Failed to get receipt for tx_hash={:?}: {}", info.tx_hash, e);
                     failed_txns.push(info);
                 }
             }
         }
 
         if !failed_txns.is_empty() {
-            debug!(
-                "Failed to get receipt for {} transactions",
-                failed_txns.len()
-            );
+            debug!("Failed to get receipt for {} transactions", failed_txns.len());
         }
 
-        let successful_txns_hash = successful_txns
-            .iter()
-            .map(|(info, _)| info.tx_hash)
-            .collect::<HashSet<_>>();
+        let successful_txns_hash =
+            successful_txns.iter().map(|(info, _)| info.tx_hash).collect::<HashSet<_>>();
 
         // 2. If there are successful transactions, calculate median time and clean up
         // Only use heuristic batch cleaning in Partial mode. In Full mode, we track every txn explicitly.
@@ -581,7 +562,10 @@ impl TxnTracker {
                         );
                     }
                 } else {
-                    debug!("Duplicate resolution skipped: plan_id={}, tx_hash={:?}", info.metadata.plan_id, info.tx_hash);
+                    debug!(
+                        "Duplicate resolution skipped: plan_id={}, tx_hash={:?}",
+                        info.metadata.plan_id, info.tx_hash
+                    );
                 }
             }
         }
@@ -694,11 +678,7 @@ impl TxnTracker {
             let max = *self.latencies.iter().max().unwrap();
             (avg, min, max)
         } else {
-            (
-                Duration::from_secs(0),
-                Duration::from_secs(0),
-                Duration::from_secs(0),
-            )
+            (Duration::from_secs(0), Duration::from_secs(0), Duration::from_secs(0))
         };
 
         // Calculate success rate
@@ -718,12 +698,12 @@ impl TxnTracker {
 
         for (_plan_id, tracker) in &self.plan_trackers {
             if tracker.plan_failed_production {
-                // Counted separately or as completed failed? 
+                // Counted separately or as completed failed?
                 // Let's count it as completed (failed) for the "Completed Plans" metric if we consider it "Done"
-                // But for clarity, let's keep it separate or part of "Not Produced" logic? 
-                // The requirement is to explain "Not Produced". 
+                // But for clarity, let's keep it separate or part of "Not Produced" logic?
+                // The requirement is to explain "Not Produced".
                 // If we set plan_produced=true in mark_plan_failed, it lands here.
-                
+
                 // If failed production, it contributes to "Prod Failures" but we should decide if it's "Completed".
                 // Since it will never produce more txns, it is effectively completed (failed).
                 completed_plans += 1;
@@ -752,12 +732,7 @@ impl TxnTracker {
         table.load_preset(UTF8_FULL);
 
         // Set table header - summary statistics
-        table.set_header(vec![
-            "Metric",
-            "Value",
-            "Metric",
-            "Value",
-        ]);
+        table.set_header(vec!["Metric", "Value", "Metric", "Value"]);
 
         // Row 1: Txn progress and TPS
         table.add_row(vec![
@@ -792,7 +767,11 @@ impl TxnTracker {
             Cell::new("Produced Plans"),
             Cell::new(&format_large_number(produced_plans)),
             Cell::new("Not Produced"),
-            Cell::new(&format!("{}/{}F", format_large_number(not_produced_plans), format_large_number(self.total_failed_production_plans))),
+            Cell::new(&format!(
+                "{}/{}F",
+                format_large_number(not_produced_plans),
+                format_large_number(self.total_failed_production_plans)
+            )),
         ]);
 
         // Row 5: Completed plans and in progress plans

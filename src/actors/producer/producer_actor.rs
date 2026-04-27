@@ -8,8 +8,8 @@ use std::time::Duration;
 use crate::actors::consumer::Consumer;
 use crate::actors::monitor::monitor_actor::{PlanProduced, ProduceTxns};
 use crate::actors::monitor::{
-    Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer, ReportProducerStats,
-    SubmissionResult, UpdateSubmissionResult, CorrectNonces,
+    CorrectNonces, Monitor, PlanCompleted, PlanFailed, RegisterPlan, RegisterProducer,
+    ReportProducerStats, SubmissionResult, UpdateSubmissionResult,
 };
 use crate::actors::{ExeFrontPlan, PauseProducer, ResumeProducer};
 use crate::txn_plan::{addr_pool::AddressPool, PlanExecutionMode, PlanId, TxnPlan};
@@ -34,9 +34,7 @@ pub struct ProducerState {
 
 impl ProducerState {
     pub fn running() -> Self {
-        Self {
-            state: Arc::new(AtomicU32::new(1)),
-        }
+        Self { state: Arc::new(AtomicU32::new(1)) }
     }
 
     pub fn set_running(&self) {
@@ -167,9 +165,7 @@ impl Producer {
         // Fetch accounts and build transactions
         let ready_accounts =
             address_pool.fetch_senders(plan.size().unwrap_or_else(|| address_pool.len()));
-        let iterator = plan
-            .as_mut()
-            .build_txns(ready_accounts, account_generator.clone())?;
+        let iterator = plan.as_mut().build_txns(ready_accounts, account_generator.clone())?;
 
         // If the plan doesn't consume nonces, accounts can be used by other processes immediately.
         if !iterator.consume_nonce {
@@ -177,10 +173,7 @@ impl Producer {
         }
         // must send to monitor before sending to consumer
         monitor_addr
-            .send(RegisterPlan {
-                plan_id: plan_id.clone(),
-                plan_name: plan.name().to_string(),
-            })
+            .send(RegisterPlan { plan_id: plan_id.clone(), plan_name: plan.name().to_string() })
             .await
             .unwrap();
         let mut count = 0;
@@ -207,22 +200,13 @@ impl Producer {
                     plan_id: plan_id.clone(),
                     reason: format!("Consumer send error: {}", e),
                 });
-                return Err(anyhow::anyhow!(
-                    "Failed to send transaction to Consumer: {}",
-                    e
-                ));
+                return Err(anyhow::anyhow!("Failed to send transaction to Consumer: {}", e));
             }
-            monitor_addr.do_send(ProduceTxns {
-                plan_id: plan_id.clone(),
-                count: 1,
-            });
+            monitor_addr.do_send(ProduceTxns { plan_id: plan_id.clone(), count: 1 });
             count += 1;
             sending_txns.fetch_add(1, Ordering::Relaxed);
         }
-        monitor_addr.do_send(PlanProduced {
-            plan_id: plan_id.clone(),
-            count,
-        });
+        monitor_addr.do_send(PlanProduced { plan_id: plan_id.clone(), count });
 
         tracing::debug!(
             "All transactions for plan '{}' (id={}) ({} txns) have been sent to the consumer.",
@@ -239,9 +223,7 @@ impl Actor for Producer {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.monitor_addr.do_send(RegisterProducer {
-            addr: ctx.address(),
-        });
+        self.monitor_addr.do_send(RegisterProducer { addr: ctx.address() });
         let address_pool = self.address_pool.clone();
         async move {
             let count = address_pool.len();
@@ -311,10 +293,7 @@ impl Handler<ExeFrontPlan> for Producer {
                 {
                     tracing::error!("Execution of plan '{}' failed: {}", plan_id, e);
                     // Notify self of failure to handle cleanup and trigger the next plan.
-                    self_addr.do_send(PlanFailed {
-                        plan_id,
-                        reason: e.to_string(),
-                    });
+                    self_addr.do_send(PlanFailed { plan_id, reason: e.to_string() });
                     return Ok(None);
                 }
 
@@ -360,11 +339,7 @@ impl Handler<RegisterTxnPlan> for Producer {
 
         self.stats.remain_plans_num += 1;
         let plan_id = msg.plan.id().clone();
-        tracing::debug!(
-            "Registering new plan '{}' (id={}).",
-            msg.plan.name(),
-            plan_id
-        );
+        tracing::debug!("Registering new plan '{}' (id={}).", msg.plan.name(), plan_id);
 
         // Add the plan to the back of the queue.
         self.plan_queue.push_back(msg.plan);
@@ -432,9 +407,7 @@ impl Handler<UpdateSubmissionResult> for Producer {
         let address_pool = self.address_pool.clone();
         self.stats
             .sending_txns
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| {
-                Some(val.saturating_sub(1))
-            })
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |val| Some(val.saturating_sub(1)))
             .ok();
         match msg.result.as_ref() {
             SubmissionResult::Success(_) => {
@@ -523,7 +496,9 @@ impl Handler<CorrectNonces> for Producer {
 
         for correction in msg.corrections {
             // Find the account_id from the address
-            if let Some(account_id) = self.account_generator.find_account_id_by_address(&correction.account) {
+            if let Some(account_id) =
+                self.account_generator.find_account_id_by_address(&correction.account)
+            {
                 tracing::debug!(
                     "Correcting nonce for account {:?} to {}",
                     correction.account,
@@ -532,19 +507,14 @@ impl Handler<CorrectNonces> for Producer {
                 // Update nonce cache
                 self.nonce_cache.insert(account_id, correction.expected_nonce as u32);
                 // Unlock the account with the correct nonce
-                self.address_pool.unlock_correct_nonce(account_id, correction.expected_nonce as u32);
+                self.address_pool
+                    .unlock_correct_nonce(account_id, correction.expected_nonce as u32);
             } else {
-                tracing::warn!(
-                    "Could not find account_id for address {:?}",
-                    correction.account
-                );
+                tracing::warn!("Could not find account_id for address {:?}", correction.account);
             }
         }
 
         // Update ready accounts count
-        self.stats.ready_accounts.store(
-            self.address_pool.ready_len() as u64,
-            Ordering::Relaxed,
-        );
+        self.stats.ready_accounts.store(self.address_pool.ready_len() as u64, Ordering::Relaxed);
     }
 }

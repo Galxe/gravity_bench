@@ -30,16 +30,9 @@ impl RandomAddressPool {
             ready_accounts.push((account_id, nonce));
         }
 
-        let inner = Inner {
-            account_status,
-            ready_accounts,
-            all_account_ids: account_ids,
-        };
+        let inner = Inner { account_status, ready_accounts, all_account_ids: account_ids };
 
-        Self {
-            inner: Mutex::new(inner),
-            account_generator,
-        }
+        Self { inner: Mutex::new(inner), account_generator }
     }
 }
 

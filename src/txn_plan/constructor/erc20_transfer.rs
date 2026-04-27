@@ -28,12 +28,7 @@ impl Erc20TransferConstructor {
         chain_id: u64,
         address_pool: Arc<dyn AddressPool>,
     ) -> Self {
-        Self {
-            token_list,
-            transfer_amount,
-            chain_id,
-            address_pool,
-        }
+        Self { token_list, transfer_amount, chain_id, address_pool }
     }
 }
 
@@ -49,10 +44,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
         let to_address = account_generator.get_address_by_id(to_address);
         let from_address = account_generator.get_address_by_id(from_account_id);
         // build ERC20 transfer call
-        let transfer_call = IERC20::transferCall {
-            to: to_address,
-            amount: self.transfer_amount,
-        };
+        let transfer_call = IERC20::transferCall { to: to_address, amount: self.transfer_amount };
 
         let call_data = transfer_call.abi_encode();
         let call_data = Bytes::from(call_data);

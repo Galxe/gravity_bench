@@ -28,13 +28,7 @@ impl SwapTokenToTokenConstructor {
         transter_amount: U256,
         router_address: Address,
     ) -> Self {
-        Self {
-            token_list,
-            chain_id,
-            address_pool,
-            transter_amount,
-            router_address,
-        }
+        Self { token_list, chain_id, address_pool, transter_amount, router_address }
     }
 }
 
