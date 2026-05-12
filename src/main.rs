@@ -371,6 +371,49 @@ async fn start_bench() -> Result<()> {
     let faucet_address =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
     let on_chain_nonce = eth_clients[0].get_pending_txn_count(faucet_address).await.unwrap();
+    // Clamp configured fauce_eth_balance to the actual on-chain balance to prevent
+    // U256 underflow inside FaucetTreePlanBuilder::new when (gas_budget * total_txns)
+    // exceeds the configured amount. Underflow produces ~2^256 funding values that
+    // permanently strip ENOUGH_BALANCE in the txpool and silently deadlock cascade.
+    let on_chain_faucet_balance = eth_clients[0]
+        .get_balance(&faucet_address)
+        .await
+        .expect("failed to query faucet on-chain balance");
+    let configured_faucet_eth = benchmark_config.faucet.fauce_eth_balance;
+    // Use the lesser of on-chain and configured, but never less than the cascade actually
+    // needs. Heuristic: cascade needs total_cost ≈ (intermediate_txns + final_txns) *
+    // gas_per_txn + intermediate_txns * remained_eth. We don't have those numbers here, so
+    // we fall back to on-chain whenever the config can't possibly cover the cascade.
+    // Concretely: if on_chain < configured we clamp down (sanity); otherwise we prefer the
+    // larger of the two so the cascade math has enough headroom. The U256 underflow assert
+    // inside FaucetTreePlanBuilder still catches the absurd case.
+    let effective_faucet_eth = if on_chain_faucet_balance < configured_faucet_eth {
+        tracing::warn!(
+            "fauce_eth_balance ({}) exceeds on-chain balance ({}); clamping down.",
+            configured_faucet_eth,
+            on_chain_faucet_balance
+        );
+        on_chain_faucet_balance
+    } else if configured_faucet_eth < on_chain_faucet_balance {
+        // Configured is smaller than on-chain. The cascade math scales with this number;
+        // if it's too small we silently U256-underflow. Prefer on-chain, leaving 1% as
+        // headroom so faucet can still pay misc fees outside the cascade.
+        let headroom = on_chain_faucet_balance / U256::from(100);
+        let usable = on_chain_faucet_balance - headroom;
+        tracing::warn!(
+            "fauce_eth_balance ({}) is smaller than on-chain ({}); using on-chain - 1% headroom = {} to size cascade.",
+            configured_faucet_eth,
+            on_chain_faucet_balance,
+            usable
+        );
+        usable
+    } else {
+        configured_faucet_eth
+    };
+    info!(
+        "Faucet ETH plan: configured={}, on_chain={}, effective={}",
+        configured_faucet_eth, on_chain_faucet_balance, effective_faucet_eth
+    );
     // In recover mode, use the saved start_nonce so that the skip logic
     // correctly identifies already-completed Level 0 transactions.
     // In normal mode, use the current on-chain nonce.
@@ -388,7 +431,7 @@ async fn start_bench() -> Result<()> {
     }
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
-        benchmark_config.faucet.fauce_eth_balance,
+        effective_faucet_eth,
         &benchmark_config.faucet.private_key,
         start_nonce,
         account_addresses.clone(),
@@ -554,7 +597,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
             let mut init_nonce: Option<u64> = None;
             for attempt in 0..5 {
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
+                    std::time::Duration::from_secs(60),
                     client.get_pending_txn_count(addr),
                 )
                 .await
@@ -599,7 +642,7 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         }
     });
 
-    stream::iter(tasks).buffer_unordered(1024).collect::<Vec<_>>().await;
+    stream::iter(tasks).buffer_unordered(16).collect::<Vec<_>>().await;
 
     pb.finish_with_message("Done");
     let elapsed = start_time.elapsed();

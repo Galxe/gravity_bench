@@ -75,6 +75,19 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
 
             let total_remained_eth = U256::from(intermediate_txns) * remained_eth;
             let total_cost = total_gas_cost + total_remained_eth;
+            assert!(
+                faucet_balance >= total_cost,
+                "FaucetTreePlanBuilder: faucet_balance ({}) < total_cost ({}). \
+                 total_txns={}, gas_per_txn={}, remained_eth={}. \
+                 U256 subtraction would silently wrap to ~2^256, creating fund \
+                 values that exceed any account's true balance and permanently \
+                 strip ENOUGH_BALANCE in the txpool — cascade would deadlock.",
+                faucet_balance,
+                total_cost,
+                total_txns,
+                gas_cost_per_txn,
+                remained_eth,
+            );
             let amount_for_leaves = faucet_balance - total_cost;
 
             let amount_per_recipient = if total_accounts > 0 {

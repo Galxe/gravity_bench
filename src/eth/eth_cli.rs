@@ -119,10 +119,11 @@ impl EthHttpCli {
         let mut inner = Vec::new();
         for _ in 0..1 {
             let client = reqwest::Client::builder()
-                .pool_idle_timeout(Duration::from_secs(10)) // Shorter idle, high TPS rarely idles
+                .pool_idle_timeout(Duration::from_secs(90)) // reqwest default; keep sockets warm so they get reused, not churned
                 .pool_max_idle_per_host(2000) // Large pool for 1500 concurrent senders
                 .tcp_keepalive(Duration::from_secs(30))
                 .tcp_nodelay(true) // Disable Nagle's algorithm for low latency
+                .timeout(Duration::from_secs(10)) // connection-aware per-request timeout; recycles socket back to pool
                 .build()
                 .unwrap();
 
@@ -154,11 +155,11 @@ impl EthHttpCli {
     }
 
     pub async fn get_pending_txn_count(&self, address: Address) -> Result<u64> {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            let nonce = self.inner[0].get_transaction_count(address).pending().await?;
-            Ok(nonce)
-        })
-        .await?
+        // Per-request timeout is now enforced by reqwest::Client::builder().timeout(...).
+        // The reqwest-builtin timeout is connection-aware and recycles the socket back to the pool,
+        // unlike tokio::time::timeout which dropped the future mid-read and leaked sockets.
+        let nonce = self.inner[0].get_transaction_count(address).pending().await?;
+        Ok(nonce)
     }
 
     /// Verify network connection
@@ -388,18 +389,16 @@ impl EthHttpCli {
     pub async fn send_raw_tx(&self, tx_bytes: Vec<u8>) -> Result<TxHash> {
         let idx = rand::thread_rng().gen_range(0..self.inner.len());
         let start = Instant::now();
-        let op = async {
+
+        // Per-request timeout is enforced by the reqwest Client's built-in .timeout(...).
+        // Using reqwest's timeout instead of tokio::time::timeout keeps the socket attached to
+        // the connection pool when the timeout fires; tokio::time::timeout dropped the future
+        // mid-read and reqwest discarded the socket, leaking connections under high load.
+        let final_result: Result<TxHash> = async {
             let pending_tx = self.inner[idx].send_raw_transaction(&tx_bytes).await?;
-            anyhow::Ok(pending_tx.tx_hash().clone())
-        };
-
-        let result = tokio::time::timeout(Duration::from_secs(10), op).await;
-
-        let final_result = match result {
-            Ok(Ok(hash)) => Ok(hash.clone()),
-            Ok(Err(e)) => Err(anyhow::Error::from(e)),
-            Err(e) => Err(anyhow::Error::from(e)),
-        };
+            Ok(*pending_tx.tx_hash())
+        }
+        .await;
 
         self.update_metrics("eth_sendRawTransaction", final_result.is_ok(), start.elapsed()).await;
 
@@ -446,11 +445,9 @@ impl EthHttpCli {
     }
 
     pub async fn get_latest_txn_count(&self, address: &Address) -> Result<u64> {
-        tokio::time::timeout(Duration::from_secs(10), async {
-            let nonce = self.inner[0].get_transaction_count(*address).latest().await?;
-            Ok(nonce)
-        })
-        .await?
+        // Per-request timeout enforced by reqwest Client's built-in .timeout(...); see send_raw_tx.
+        let nonce = self.inner[0].get_transaction_count(*address).latest().await?;
+        Ok(nonce)
     }
 
     // pub async fn get_account(&self, address: Address) -> Result<Account> {
