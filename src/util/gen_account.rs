@@ -213,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "brute-force scan of 1M key derivations; manual lookup utility, too slow for CI; run with `cargo test -- --ignored`"]
     fn test_find_account_by_address() {
         // Find account ID for a specific address
         let target_address = "0x3ece3a612e4e8849a3eaf093c61683b1370f3418";
@@ -308,6 +309,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires a running node at localhost:8545; run with `cargo test -- --ignored`"]
     async fn test_check_account_balances() {
         use crate::eth::EthHttpCli;
 
@@ -367,6 +369,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires a running node at localhost:8545; run with `cargo test -- --ignored`"]
     async fn test_faucet_eth_to_accounts() {
         use crate::eth::{EthHttpCli, TxnBuilder};
         use alloy::primitives::U256;
