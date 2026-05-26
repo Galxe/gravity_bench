@@ -371,6 +371,48 @@ async fn start_bench() -> Result<()> {
     let faucet_address =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
     let on_chain_nonce = eth_clients[0].get_pending_txn_count(faucet_address).await.unwrap();
+    // Clamp configured fauce_eth_balance to the actual on-chain balance to prevent
+    // U256 underflow inside FaucetTreePlanBuilder::new when (gas_budget * total_txns)
+    // exceeds the configured amount. Underflow produces ~2^256 funding values that
+    // permanently strip ENOUGH_BALANCE in the txpool and silently deadlock cascade.
+    // retry_with_backoff retries 3× with 5s/10s/10s — up to ~25s wall time on
+    // a dead RPC before this expect() fires.
+    let on_chain_faucet_balance = eth_clients[0]
+        .get_balance(&faucet_address)
+        .await
+        .expect("failed to query faucet on-chain balance");
+    let configured_faucet_eth = benchmark_config.faucet.fauce_eth_balance;
+    // Pick an on-chain-aware faucet ceiling for the cascade math:
+    //   - If on-chain balance < configured: clamp DOWN to on-chain reality so the
+    //     cascade can't be sized for funds we don't have (avoids U256 underflow in
+    //     FaucetTreePlanBuilder when configured exceeds the real balance).
+    //   - If on-chain balance >= configured: use 99% of on-chain (1% headroom for
+    //     fees outside the cascade) to scale the cascade UP to what's actually
+    //     available, rather than under-using a well-funded faucet.
+    // The FaucetTreePlanBuilder assert is the final backstop for absurd inputs.
+    let effective_faucet_eth = if on_chain_faucet_balance < configured_faucet_eth {
+        tracing::warn!(
+            "fauce_eth_balance ({}) exceeds on-chain balance ({}); clamping down.",
+            configured_faucet_eth,
+            on_chain_faucet_balance
+        );
+        on_chain_faucet_balance
+    } else if configured_faucet_eth < on_chain_faucet_balance {
+        // Configured is smaller than on-chain. Scale the cascade up to (on-chain - 1%)
+        // so a well-funded faucet isn't under-used; the 1% headroom covers misc fees
+        // outside the cascade.
+        // Note: if on_chain == 0, headroom == 0 and usable == 0 — the cascade builder's
+        // assert will catch this with a clear panic before any U256 underflow.
+        let headroom = on_chain_faucet_balance / U256::from(100);
+        let usable = on_chain_faucet_balance - headroom;
+        usable
+    } else {
+        configured_faucet_eth
+    };
+    info!(
+        "Faucet ETH plan: configured={}, on_chain={}, effective={}",
+        configured_faucet_eth, on_chain_faucet_balance, effective_faucet_eth
+    );
     // In recover mode, use the saved start_nonce so that the skip logic
     // correctly identifies already-completed Level 0 transactions.
     // In normal mode, use the current on-chain nonce.
@@ -388,7 +430,7 @@ async fn start_bench() -> Result<()> {
     }
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
-        benchmark_config.faucet.fauce_eth_balance,
+        effective_faucet_eth,
         &benchmark_config.faucet.private_key,
         start_nonce,
         account_addresses.clone(),
@@ -553,8 +595,11 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
             // retry on RPC errors and timeouts.
             let mut init_nonce: Option<u64> = None;
             for attempt in 0..5 {
+                // 60s per nonce fetch (vs default 10s): nonce init runs early when the
+                // chain may still be initializing; tolerating slow first responses avoids
+                // spurious panics during startup.
                 match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
+                    std::time::Duration::from_secs(60),
                     client.get_pending_txn_count(addr),
                 )
                 .await
@@ -599,7 +644,10 @@ async fn init_nonce(accout_generator: &mut AccountGenerator, eth_client: Arc<Eth
         }
     });
 
-    stream::iter(tasks).buffer_unordered(1024).collect::<Vec<_>>().await;
+    // 16 concurrent nonce fetches: high enough to saturate RPC parallelism on
+    // typical clusters, low enough to avoid overwhelming a single PFN's RPC
+    // handler thread pool when num_accounts is large.
+    stream::iter(tasks).buffer_unordered(16).collect::<Vec<_>>().await;
 
     pb.finish_with_message("Done");
     let elapsed = start_time.elapsed();
