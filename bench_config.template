@@ -20,8 +20,11 @@ private_key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 faucet_level = 10
 # Wait duration in seconds between faucet distribution levels
 # If you encounter 'insufficient funds' errors, try increasing this value
-wait_duration_secs = 60
-fauce_eth_balance = "100000000000000000000"
+wait_duration_secs = 5
+# Total ETH the faucet distributes to test accounts (in ETH units, not wei).
+# After subtracting gas reserves, the remainder is split equally among all accounts.
+# This is the total spendable ETH budget for the benchmark run.
+faucet_eth_balance = "100.0"
 
 # Load testing account configuration
 [accounts]
