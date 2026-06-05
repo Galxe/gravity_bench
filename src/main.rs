@@ -371,7 +371,7 @@ async fn start_bench() -> Result<()> {
     let faucet_address =
         PrivateKeySigner::from_str(&benchmark_config.faucet.private_key).unwrap().address();
     let on_chain_nonce = eth_clients[0].get_pending_txn_count(faucet_address).await.unwrap();
-    // Clamp configured fauce_eth_balance to the actual on-chain balance to prevent
+    // Clamp configured faucet_eth_balance to the actual on-chain balance to prevent
     // U256 underflow inside FaucetTreePlanBuilder::new when (gas_budget * total_txns)
     // exceeds the configured amount. Underflow produces ~2^256 funding values that
     // permanently strip ENOUGH_BALANCE in the txpool and silently deadlock cascade.
@@ -381,7 +381,7 @@ async fn start_bench() -> Result<()> {
         .get_balance(&faucet_address)
         .await
         .expect("failed to query faucet on-chain balance");
-    let configured_faucet_eth = benchmark_config.faucet.fauce_eth_balance;
+    let configured_faucet_eth = benchmark_config.faucet.faucet_eth_balance;
     // Pick an on-chain-aware faucet ceiling for the cascade math:
     //   - If on-chain balance < configured: clamp DOWN to on-chain reality so the
     //     cascade can't be sized for funds we don't have (avoids U256 underflow in
@@ -392,7 +392,7 @@ async fn start_bench() -> Result<()> {
     // The FaucetTreePlanBuilder assert is the final backstop for absurd inputs.
     let effective_faucet_eth = if on_chain_faucet_balance < configured_faucet_eth {
         tracing::warn!(
-            "fauce_eth_balance ({}) exceeds on-chain balance ({}); clamping down.",
+            "faucet_eth_balance ({}) exceeds on-chain balance ({}); clamping down.",
             configured_faucet_eth,
             on_chain_faucet_balance
         );
