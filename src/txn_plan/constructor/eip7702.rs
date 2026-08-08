@@ -93,9 +93,8 @@ impl FromTxnConstructor for Eip7702Constructor {
             amounts.push(self.amount_per_recipient);
         }
 
-        let call_data = Bytes::from(
-            IBatchExecutor::multiSendCall { recipients, amounts }.abi_encode(),
-        );
+        let call_data =
+            Bytes::from(IBatchExecutor::multiSendCall { recipients, amounts }.abi_encode());
 
         // Self-sponsored: auth nonce is sender's post-tx-check nonce (= N+1).
         let auth = Authorization {
