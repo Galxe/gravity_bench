@@ -83,16 +83,14 @@ pub const EIP7702_SET_CODE_GAS_LIMIT: u64 = 100_000;
 /// Gas limit for deploying the minimal fallback-only delegate target.
 pub const EIP7702_DELEGATE_DEPLOY_GAS_LIMIT: u64 = 300_000;
 
-/// Minimal runtime-only fallback contract used as the EIP-7702 delegation target.
+/// Minimal contract used as the EIP-7702 delegation target.
 ///
-/// Solidity equivalent:
-/// ```solidity
-/// contract Delegate { fallback() external payable {} }
-/// ```
-/// (compiled solc 0.8.30, runtime+creation bytecode).
+/// Creation bytecode deploys a one-byte runtime (`STOP` = `0x00`) so calls
+/// to the delegate (or to an EOA that delegated to it) succeed with empty
+/// return data. The previous solc empty-contract blob ended in `REVERT`
+/// (`5f80fd`), which made every type-4 call land with `status=0x0`.
+///
+/// Layout: `PUSH1 1; PUSH1 12; PUSH1 0; CODECOPY; PUSH1 1; PUSH1 0; RETURN; STOP`
 pub fn delegate_contract_bytecode() -> Vec<u8> {
-    hex::decode(
-        "6080604052348015600e575f80fd5b50603e80601a5f395ff3fe60806040525f80fdfea164736f6c634300081e000a",
-    )
-    .expect("invalid delegate bytecode hex")
+    hex::decode("6001600c60003960016000f300").expect("invalid delegate bytecode hex")
 }
