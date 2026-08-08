@@ -100,6 +100,7 @@ impl<C: FromTxnConstructor> TxnPlan for ManyToOnePlan<C> {
                             let metadata = Arc::new(TxnMetadata {
                                 from_account: Arc::new(address),
                                 nonce: *nonce as u64,
+                                nonce_increment: constructor.nonce_increment(),
                                 txn_id: Uuid::new_v4(),
                                 from_account_id: *from_account_id,
                                 plan_id: plan_id.clone(),
@@ -210,6 +211,7 @@ impl<C: ToTxnConstructor> TxnPlan for OneToManyPlan<C> {
                                         ),
                                         from_account_id,
                                         nonce: 0,
+                                        nonce_increment: 1,
                                         txn_id: Uuid::new_v4(),
                                         plan_id: plan_id.clone(),
                                     });

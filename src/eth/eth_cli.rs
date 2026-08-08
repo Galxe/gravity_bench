@@ -2,7 +2,7 @@ use alloy::{
     consensus::TxEnvelope,
     eips::Encodable2718,
     network::Ethereum,
-    primitives::{Address, TxHash, U256},
+    primitives::{Address, Bytes, TxHash, U256},
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::{client::RpcClient, types::TransactionReceipt},
     transports::http::Http,
@@ -448,6 +448,38 @@ impl EthHttpCli {
         // Per-request timeout enforced by reqwest Client's built-in .timeout(...); see send_raw_tx.
         let nonce = self.inner[0].get_transaction_count(*address).latest().await?;
         Ok(nonce)
+    }
+
+    /// eth_getCode — used to verify EIP-7702 delegate deploy / recover.
+    pub async fn get_code_at(&self, address: Address) -> Result<Bytes> {
+        let start = Instant::now();
+        let result =
+            self.retry_with_backoff(|| async { self.inner[0].get_code_at(address).await }).await;
+        self.update_metrics("eth_getCode", result.is_ok(), start.elapsed()).await;
+        result.with_context(|| format!("Failed to get code at {:?}", address))
+    }
+
+    /// Poll eth_getTransactionReceipt until present or timeout.
+    pub async fn wait_for_receipt(
+        &self,
+        tx_hash: TxHash,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> Result<TransactionReceipt> {
+        let start = Instant::now();
+        loop {
+            if let Some(receipt) = self.get_transaction_receipt(tx_hash).await? {
+                return Ok(receipt);
+            }
+            if start.elapsed() >= timeout {
+                return Err(anyhow::anyhow!(
+                    "timed out waiting for receipt of {:?} after {:?}",
+                    tx_hash,
+                    timeout
+                ));
+            }
+            sleep(poll_interval).await;
+        }
     }
 
     // pub async fn get_account(&self, address: Address) -> Result<Account> {

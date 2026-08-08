@@ -7,6 +7,12 @@ nodes = [
     { rpc_url = "http://localhost:8545", chain_id = 1337 },
 ]
 num_tokens=2
+# Workload type: "erc20" (default), "swap", or "eip7702"
+# - erc20: EIP-1559 ERC20 transfers
+# - swap: Uniswap V2 token swaps
+# - eip7702: EIP-7702 type-4 SetCode self-sponsored delegations
+workload = "erc20"
+# Legacy flag (still honored when `workload` is omitted): true → swap, false → erc20
 enable_swap_token = false
 # Address pool type: "random" (default) or "weighted" (hot/normal/long-tail distribution)
 address_pool_type = "random"

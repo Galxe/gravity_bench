@@ -428,7 +428,17 @@ impl Handler<UpdateSubmissionResult> for Producer {
                 let account_id = msg.metadata.from_account_id;
                 match msg.result.as_ref() {
                     SubmissionResult::Success(_) => {
-                        address_pool.unlock_next_nonce(account_id);
+                        // Self-sponsored EIP-7702 advances sender nonce by 2
+                        // (tx + authorization). Other workloads use 1.
+                        if msg.metadata.nonce_increment == 1 {
+                            address_pool.unlock_next_nonce(account_id);
+                        } else {
+                            let next_nonce = msg
+                                .metadata
+                                .nonce
+                                .saturating_add(msg.metadata.nonce_increment as u64);
+                            address_pool.unlock_correct_nonce(account_id, next_nonce as u32);
+                        }
                     }
                     SubmissionResult::NonceTooLow { expect_nonce, .. } => {
                         tracing::debug!(

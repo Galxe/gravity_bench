@@ -1,9 +1,11 @@
 use actix::{Actor, Addr};
 use alloy::{
-    primitives::{Address, U256},
+    eips::Encodable2718,
+    network::TransactionBuilder,
+    primitives::{Address, Bytes, U256},
     signers::local::PrivateKeySigner,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -17,17 +19,19 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncBufReadExt, BufReader as TokioBufReader};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
-    config::{BenchConfig, ContractConfig},
-    eth::EthHttpCli,
+    config::{BenchConfig, ContractConfig, WorkloadType},
+    eth::{EthHttpCli, TxnBuilder, BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
     txn_plan::{
         addr_pool::AddressPool,
-        constructor::FaucetTreePlanBuilder,
+        constructor::{
+            delegate_contract_bytecode, FaucetTreePlanBuilder, EIP7702_DELEGATE_DEPLOY_GAS_LIMIT,
+        },
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
     },
@@ -58,6 +62,9 @@ struct Args {
 struct Snapshot {
     seed: String,
     faucet_start_nonce: u64,
+    /// EIP-7702 delegate contract address (set when workload = eip7702).
+    #[serde(default)]
+    eip7702_delegate: Option<String>,
 }
 
 // mod uniswap;
@@ -229,6 +236,140 @@ async fn test_erc20_transfer(
     Ok(())
 }
 
+async fn test_eip7702(
+    chain_id: u64,
+    delegate: Address,
+    producer: &Addr<Producer>,
+    tps: usize,
+    duration_secs: u64,
+) -> Result<()> {
+    let start_time = Instant::now();
+    loop {
+        if duration_secs > 0 && start_time.elapsed() >= Duration::from_secs(duration_secs) {
+            info!("Benchmark duration of {} seconds reached. Stopping.", duration_secs);
+            break;
+        }
+        let plan = PlanBuilder::eip7702_set_code(chain_id, delegate, tps);
+        let rx = match run_plan(plan, producer).await {
+            Ok(rx) => rx,
+            Err(e) => {
+                info!("Failed to submit plan: {}. Retrying...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        tokio::spawn(async move {
+            if let Err(e) = rx.await {
+                error!("Plan execution failed: {:?}", e);
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
+
+/// Deploy the minimal EIP-7702 delegate target from the faucet account.
+/// Returns `(delegate_address, next_faucet_nonce)`.
+async fn deploy_eip7702_delegate(
+    eth_client: &EthHttpCli,
+    faucet_key: &str,
+    chain_id: u64,
+    faucet_nonce: u64,
+) -> Result<(Address, u64)> {
+    let signer = PrivateKeySigner::from_str(faucet_key)
+        .context("invalid faucet private key for delegate deploy")?;
+    let faucet_addr = signer.address();
+    let bytecode = Bytes::from(delegate_contract_bytecode());
+
+    let tx_request = alloy::rpc::types::TransactionRequest::default()
+        .with_from(faucet_addr)
+        .with_deploy_code(bytecode)
+        .with_nonce(faucet_nonce)
+        .with_chain_id(chain_id)
+        .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
+        .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+        .with_gas_limit(EIP7702_DELEGATE_DEPLOY_GAS_LIMIT);
+
+    let envelope = TxnBuilder::build_and_sign_transaction(tx_request, &signer)?;
+    let tx_hash = eth_client.send_raw_tx(envelope.encoded_2718()).await?;
+    info!("EIP-7702 delegate deploy submitted: {:?}", tx_hash);
+
+    let receipt = eth_client
+        .wait_for_receipt(tx_hash, Duration::from_secs(120), Duration::from_millis(500))
+        .await
+        .context("waiting for EIP-7702 delegate deploy receipt")?;
+
+    let status = receipt.status();
+    if !status {
+        return Err(anyhow::anyhow!(
+            "EIP-7702 delegate deploy failed (status=0), tx={:?}",
+            tx_hash
+        ));
+    }
+
+    let contract_address = receipt.contract_address.ok_or_else(|| {
+        anyhow::anyhow!("EIP-7702 delegate deploy receipt missing contractAddress")
+    })?;
+
+    // Sanity: expected CREATE address from (sender, nonce)
+    let expected = faucet_addr.create(faucet_nonce);
+    if contract_address != expected {
+        warn!(
+            "delegate address from receipt ({:#x}) != CREATE prediction ({:#x}); using receipt",
+            contract_address, expected
+        );
+    }
+
+    let code = eth_client.get_code_at(contract_address).await?;
+    if code.is_empty() {
+        return Err(anyhow::anyhow!("no code at deployed delegate {:#x}", contract_address));
+    }
+
+    info!("EIP-7702 delegate deployed at {:#x}", contract_address);
+    Ok((contract_address, faucet_nonce + 1))
+}
+
+/// Recover a previously deployed EIP-7702 delegate from snapshot or faucet CREATE history.
+async fn recover_eip7702_delegate(
+    eth_client: &EthHttpCli,
+    snapshot_delegate: Option<&str>,
+    faucet_addr: Address,
+    faucet_start_nonce: u64,
+) -> Result<Address> {
+    if let Some(addr_str) = snapshot_delegate {
+        let addr = Address::from_str(addr_str)
+            .with_context(|| format!("invalid eip7702_delegate in snapshot: {}", addr_str))?;
+        let code = eth_client.get_code_at(addr).await?;
+        if code.is_empty() {
+            return Err(anyhow::anyhow!(
+                "snapshot eip7702_delegate {:#x} has no code; re-run without --recover",
+                addr
+            ));
+        }
+        info!("Recovered EIP-7702 delegate from snapshot: {:#x}", addr);
+        return Ok(addr);
+    }
+
+    // Fallback: assume delegate was the last CREATE from faucet before cascade
+    // (deploy uses faucet_start_nonce - 1 if we deployed once then saved snapshot
+    // after deploy... we always save snapshot with the address when possible).
+    if faucet_start_nonce == 0 {
+        return Err(anyhow::anyhow!(
+            "cannot recover EIP-7702 delegate: no snapshot address and faucet nonce is 0"
+        ));
+    }
+    let addr = faucet_addr.create(faucet_start_nonce - 1);
+    let code = eth_client.get_code_at(addr).await?;
+    if code.is_empty() {
+        return Err(anyhow::anyhow!(
+            "no code at predicted delegate {:#x}; re-run faucet without --recover",
+            addr
+        ));
+    }
+    info!("Recovered EIP-7702 delegate via CREATE prediction: {:#x}", addr);
+    Ok(addr)
+}
+
 fn run_command(command: &str) -> Result<Output> {
     let output = Command::new("bash").arg("-c").arg(command).output()?; // ? will return Err early if there's an error
 
@@ -256,6 +397,7 @@ async fn start_bench() -> Result<()> {
     let args = Args::parse();
     let benchmark_config = BenchConfig::load(&args.config).unwrap();
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
+    let workload = benchmark_config.resolved_workload();
 
     // Initialize tracing
     let log_path = benchmark_config.log_path.trim();
@@ -301,10 +443,12 @@ async fn start_bench() -> Result<()> {
         Some(guard)
     };
 
-    let (contract_config, seed, snapshot_start_nonce) = if args.recover {
+    info!("Resolved workload: {:?}", workload);
+
+    // contract_config is only required for erc20 / swap workloads.
+    // eip7702 only needs ETH funding + a delegate target contract.
+    let (contract_config, seed, snapshot_start_nonce, snapshot_eip7702_delegate) = if args.recover {
         info!("Starting in recovery mode...");
-        let contract_config =
-            ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap();
         let snapshot_json = std::fs::read_to_string("snapshot.json").unwrap_or_else(|e| {
             panic!("Failed to read snapshot.json in recovery mode: {}", e);
         });
@@ -316,30 +460,45 @@ async fn start_bench() -> Result<()> {
         let mut seed = [0u8; 32];
         seed.copy_from_slice(&seed_bytes);
         info!("Recovered faucet_start_nonce: {}", snapshot.faucet_start_nonce);
-        (contract_config, seed, Some(snapshot.faucet_start_nonce))
+
+        let contract_config = match workload {
+            WorkloadType::Eip7702 => None,
+            WorkloadType::Erc20 | WorkloadType::Swap => Some(
+                ContractConfig::load_from_file(&benchmark_config.contract_config_path).unwrap(),
+            ),
+        };
+        (contract_config, seed, Some(snapshot.faucet_start_nonce), snapshot.eip7702_delegate)
     } else {
         info!("Starting in normal mode...");
-        let mut command = format!(
-            "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
-            benchmark_config.faucet.private_key,
-            benchmark_config.num_tokens,
-            benchmark_config.contract_config_path,
-            benchmark_config.nodes[0].rpc_url
-        );
-        if benchmark_config.enable_swap_token {
-            command.push_str(" --enable-swap-token");
-        }
-        let res = run_command(&command).unwrap();
-        info!("{}", String::from_utf8_lossy(&res.stdout));
-        let contract_config = ContractConfig::load_from_file(
-            &benchmark_config.contract_config_path,
-        )
-        .unwrap_or_else(|e| {
-            panic!("Contract config file not found {}", e);
-        });
+        let contract_config = match workload {
+            WorkloadType::Eip7702 => {
+                info!("Skipping deploy.py (EIP-7702 workload only needs ETH + delegate)");
+                None
+            }
+            WorkloadType::Erc20 | WorkloadType::Swap => {
+                let mut command = format!(
+                    "python scripts/deploy.py --private-key \"{}\" --num-tokens {} --output-file \"{}\" --rpc-url \"{}\"",
+                    benchmark_config.faucet.private_key,
+                    benchmark_config.num_tokens,
+                    benchmark_config.contract_config_path,
+                    benchmark_config.nodes[0].rpc_url
+                );
+                if matches!(workload, WorkloadType::Swap) {
+                    command.push_str(" --enable-swap-token");
+                }
+                let res = run_command(&command).unwrap();
+                info!("{}", String::from_utf8_lossy(&res.stdout));
+                Some(
+                    ContractConfig::load_from_file(&benchmark_config.contract_config_path)
+                        .unwrap_or_else(|e| {
+                            panic!("Contract config file not found {}", e);
+                        }),
+                )
+            }
+        };
 
         let seed: [u8; 32] = rand::random();
-        (contract_config, seed, None)
+        (contract_config, seed, None, None)
     };
     tracing::info!("Account generator seed: 0x{}", hex::encode(seed));
 
@@ -419,15 +578,57 @@ async fn start_bench() -> Result<()> {
     let mut start_nonce = snapshot_start_nonce.unwrap_or(on_chain_nonce);
     info!("Faucet on-chain nonce: {}, using start_nonce: {}", on_chain_nonce, start_nonce);
 
-    // Save snapshot in normal mode (after we know the start_nonce)
+    // EIP-7702: deploy (or recover) the shared delegate target before the ETH
+    // cascade so the cascade's faucet_start_nonce is exclusive of the deploy tx.
+    let eip7702_delegate = if matches!(workload, WorkloadType::Eip7702) {
+        let delegate = if args.recover {
+            recover_eip7702_delegate(
+                eth_clients[0].as_ref(),
+                snapshot_eip7702_delegate.as_deref(),
+                faucet_address,
+                start_nonce,
+            )
+            .await?
+        } else {
+            let (addr, next_nonce) = deploy_eip7702_delegate(
+                eth_clients[0].as_ref(),
+                &benchmark_config.faucet.private_key,
+                chain_id,
+                start_nonce,
+            )
+            .await?;
+            start_nonce = next_nonce;
+            addr
+        };
+        Some(delegate)
+    } else {
+        None
+    };
+
+    // Save snapshot in normal mode (after we know the cascade start_nonce and
+    // any EIP-7702 delegate address).
     if !args.recover {
-        let snapshot = Snapshot { seed: hex::encode(seed), faucet_start_nonce: start_nonce };
+        let snapshot = Snapshot {
+            seed: hex::encode(seed),
+            faucet_start_nonce: start_nonce,
+            eip7702_delegate: eip7702_delegate.map(|a| format!("{:#x}", a)),
+        };
         let snapshot_json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write("snapshot.json", &snapshot_json).unwrap_or_else(|e| {
             panic!("Failed to write snapshot.json: {}", e);
         });
         info!("Snapshot saved to snapshot.json");
     }
+    // ERC20 token distribution needs extra gas headroom for later token
+    // transfers; EIP-7702 only spends ETH on gas so leave remained_eth at 0.
+    let remained_eth = match workload {
+        WorkloadType::Eip7702 => U256::ZERO,
+        WorkloadType::Erc20 | WorkloadType::Swap => {
+            U256::from(benchmark_config.num_tokens)
+                * U256::from(21000)
+                * U256::from(1000_000_000_000u64)
+        }
+    };
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
         benchmark_config.faucet.faucet_level as usize,
         effective_faucet_eth,
@@ -435,9 +636,7 @@ async fn start_bench() -> Result<()> {
         start_nonce,
         account_addresses.clone(),
         Arc::new(EthFaucetTxnBuilder),
-        U256::from(benchmark_config.num_tokens)
-            * U256::from(21000)
-            * U256::from(1000_000_000_000u64),
+        remained_eth,
         &mut accout_generator,
     )
     .await
@@ -452,27 +651,30 @@ async fn start_bench() -> Result<()> {
     )
     .start();
 
-    let tokens = contract_config.get_all_token();
+    let tokens = contract_config.as_ref().map(|c| c.get_all_token()).unwrap_or_default();
     let mut tokens_plan = Vec::new();
-    for token in &tokens {
-        start_nonce += benchmark_config.faucet.faucet_level as u64;
-        info!("distributing token: {}", token.address);
-        let token_address = Address::from_str(&token.address).unwrap();
-        let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
-        info!("balance of token: {}", faucet_token_balance);
-        let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
-            benchmark_config.faucet.faucet_level as usize,
-            faucet_token_balance,
-            &benchmark_config.faucet.private_key,
-            start_nonce,
-            account_addresses.clone(),
-            Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
-            U256::ZERO,
-            &mut accout_generator,
-        )
-        .await
-        .unwrap();
-        tokens_plan.push(token_faucet_builder);
+    // Skip ERC20 token cascade for EIP-7702 (workers only need ETH for gas).
+    if !matches!(workload, WorkloadType::Eip7702) {
+        for token in &tokens {
+            start_nonce += benchmark_config.faucet.faucet_level as u64;
+            info!("distributing token: {}", token.address);
+            let token_address = Address::from_str(&token.address).unwrap();
+            let faucet_token_balance = U256::from_str(&token.faucet_balance).unwrap();
+            info!("balance of token: {}", faucet_token_balance);
+            let token_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(
+                benchmark_config.faucet.faucet_level as usize,
+                faucet_token_balance,
+                &benchmark_config.faucet.private_key,
+                start_nonce,
+                account_addresses.clone(),
+                Arc::new(Erc20FaucetTxnBuilder::new(token_address)),
+                U256::ZERO,
+                &mut accout_generator,
+            )
+            .await
+            .unwrap();
+            tokens_plan.push(token_faucet_builder);
+        }
     }
 
     let account_manager = accout_generator.to_manager();
@@ -552,14 +754,31 @@ async fn start_bench() -> Result<()> {
 
     let tps = benchmark_config.target_tps as usize;
     let duration_secs = benchmark_config.performance.duration_secs;
-    if benchmark_config.enable_swap_token {
-        info!("bench uniswap");
-        test_uniswap(address_pool, chain_id, contract_config, &producer, tps, duration_secs)
+    match workload {
+        WorkloadType::Swap => {
+            info!("bench uniswap");
+            let contract_config = contract_config.expect("swap workload requires contract config");
+            test_uniswap(address_pool, chain_id, contract_config, &producer, tps, duration_secs)
+                .await?;
+        }
+        WorkloadType::Erc20 => {
+            info!("bench erc20 transfer");
+            let contract_config = contract_config.expect("erc20 workload requires contract config");
+            test_erc20_transfer(
+                address_pool,
+                chain_id,
+                contract_config,
+                &producer,
+                tps,
+                duration_secs,
+            )
             .await?;
-    } else {
-        info!("bench erc20 transfer");
-        test_erc20_transfer(address_pool, chain_id, contract_config, &producer, tps, duration_secs)
-            .await?;
+        }
+        WorkloadType::Eip7702 => {
+            let delegate = eip7702_delegate.expect("eip7702 delegate must be set");
+            info!("bench EIP-7702 SetCode (delegate={:#x})", delegate);
+            test_eip7702(chain_id, delegate, &producer, tps, duration_secs).await?;
+        }
     }
     Ok(())
 }
