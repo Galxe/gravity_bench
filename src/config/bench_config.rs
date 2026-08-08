@@ -16,7 +16,7 @@ pub enum AddressPoolType {
 ///
 /// - `erc20`: EIP-1559 ERC20 transfers (default)
 /// - `swap`: Uniswap V2 token swaps (also enabled via legacy `enable_swap_token = true`)
-/// - `eip7702`: EIP-7702 type-4 SetCode self-sponsored delegations
+/// - `eip7702`: EIP-7702 type-4 SetCode + ETH multiSend (self-sponsored)
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkloadType {

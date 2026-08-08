@@ -17,7 +17,7 @@ The benchmark workloads are defined using `TxnPlan`s. These are modular definiti
 *   Approving tokens for spending by a smart contract (e.g., a DEX router).
 *   Executing ERC20 token transfers.
 *   Swapping tokens on a Uniswap V2-style DEX.
-*   EIP-7702 SetCode self-sponsored delegations (type-4 txs).
+*   EIP-7702 SetCode self-sponsored delegations with ETH multi-send (type-4 txs).
 
 This design allows for creating flexible and complex benchmarking scenarios.
 
@@ -123,7 +123,7 @@ duration_secs = 60
 *   `workload`: `"erc20"` (default), `"swap"`, or `"eip7702"`. Controls the stress workload.
     *   `erc20` — ERC20 transfers (deploys tokens via `deploy.py`, cascade-funds ETH + tokens).
     *   `swap` — Uniswap V2 swaps (also deploys router/liquidity).
-    *   `eip7702` — type-4 SetCode self-sponsored txs. Deploys a minimal delegate contract from the faucet, cascade-funds ETH only (no ERC20). Each worker re-delegates itself every tx; sender nonce advances by **2** per inclusion.
+    *   `eip7702` — type-4 SetCode self-sponsored txs with **ETH multi-send**. Deploys `BatchExecutor` (`multiSend(address[],uint256[])`) from the faucet, cascade-funds ETH only (no ERC20). Each worker re-delegates to that template, then calls **itself** with `multiSend` to **4** pool recipients (1 gwei each by default). Funds circulate among workers. Sender nonce advances by **2** per inclusion.
 *   `enable_swap_token`: **Legacy**. Prefer `workload = "swap"`. Still honored when `workload` is omitted.
 *   `faucet.wait_duration_secs`: The number of seconds to wait between faucet distribution levels. If you encounter `insufficient funds` errors during the setup phase, increasing this value can help by allowing more time for transactions to be mined and account balances to be updated.
 *   `performance.duration_secs`: The duration of the benchmark in seconds. If set to `0`, the benchmark will run indefinitely.

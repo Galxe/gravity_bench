@@ -9,6 +9,7 @@ pub use approve::ApproveTokenConstructor;
 pub use distribute_token::SwapEthToTokenConstructor;
 pub use eip7702::{
     delegate_contract_bytecode, Eip7702Constructor, EIP7702_DELEGATE_DEPLOY_GAS_LIMIT,
+    EIP7702_DEFAULT_BATCH_SIZE,
 };
 pub use erc20_transfer::Erc20TransferConstructor;
 pub use faucet::FaucetTreePlanBuilder;

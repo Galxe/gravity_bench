@@ -239,6 +239,7 @@ async fn test_erc20_transfer(
 async fn test_eip7702(
     chain_id: u64,
     delegate: Address,
+    address_pool: Arc<dyn AddressPool>,
     producer: &Addr<Producer>,
     tps: usize,
     duration_secs: u64,
@@ -249,7 +250,7 @@ async fn test_eip7702(
             info!("Benchmark duration of {} seconds reached. Stopping.", duration_secs);
             break;
         }
-        let plan = PlanBuilder::eip7702_set_code(chain_id, delegate, tps);
+        let plan = PlanBuilder::eip7702_set_code(chain_id, delegate, address_pool.clone(), tps);
         let rx = match run_plan(plan, producer).await {
             Ok(rx) => rx,
             Err(e) => {
@@ -268,7 +269,7 @@ async fn test_eip7702(
     Ok(())
 }
 
-/// Deploy the minimal EIP-7702 delegate target from the faucet account.
+/// Deploy the BatchExecutor EIP-7702 delegate target from the faucet account.
 /// Returns `(delegate_address, next_faucet_nonce)`.
 async fn deploy_eip7702_delegate(
     eth_client: &EthHttpCli,
@@ -619,8 +620,9 @@ async fn start_bench() -> Result<()> {
         });
         info!("Snapshot saved to snapshot.json");
     }
-    // ERC20 token distribution needs extra gas headroom for later token
-    // transfers; EIP-7702 only spends ETH on gas so leave remained_eth at 0.
+    // ERC20/swap need extra gas headroom for later token ops.
+    // EIP-7702 multiSend circulates tiny ETH among workers; leave 0 so the
+    // cascade pushes full share to leaves (gas + multiSend principal).
     let remained_eth = match workload {
         WorkloadType::Eip7702 => U256::ZERO,
         WorkloadType::Erc20 | WorkloadType::Swap => {
@@ -776,8 +778,12 @@ async fn start_bench() -> Result<()> {
         }
         WorkloadType::Eip7702 => {
             let delegate = eip7702_delegate.expect("eip7702 delegate must be set");
-            info!("bench EIP-7702 SetCode (delegate={:#x})", delegate);
-            test_eip7702(chain_id, delegate, &producer, tps, duration_secs).await?;
+            info!(
+                "bench EIP-7702 SetCode + ETH multiSend (delegate={:#x}, batch={})",
+                delegate,
+                txn_plan::constructor::EIP7702_DEFAULT_BATCH_SIZE
+            );
+            test_eip7702(chain_id, delegate, address_pool, &producer, tps, duration_secs).await?;
         }
     }
     Ok(())

@@ -117,11 +117,17 @@ impl PlanBuilder {
         Box::new(plan)
     }
 
-    /// Create EIP-7702 self-sponsored SetCode plan.
+    /// Create EIP-7702 self-sponsored SetCode + ETH multiSend plan.
     ///
-    /// Each tx re-delegates the sender's code to `delegate` and calls it.
-    pub fn eip7702_set_code(chain_id: u64, delegate: Address, size: usize) -> Box<dyn TxnPlan> {
-        let constructor = Eip7702Constructor::new(chain_id, delegate);
+    /// Each type-4 tx re-delegates the sender to `delegate` and calls the
+    /// sender EOA with `multiSend` to `batch_size` pool recipients.
+    pub fn eip7702_set_code(
+        chain_id: u64,
+        delegate: Address,
+        address_pool: Arc<dyn AddressPool>,
+        size: usize,
+    ) -> Box<dyn TxnPlan> {
+        let constructor = Eip7702Constructor::with_defaults(chain_id, delegate, address_pool);
         let plan = ManyToOnePlan::new(constructor, PlanExecutionMode::Partial(size));
         let plan = plan.with_size(size);
         Box::new(plan)
