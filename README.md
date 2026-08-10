@@ -1,6 +1,6 @@
 # Gravity Bench
 
-`gravity_bench` is a high-performance transaction generator for Ethereum-compatible blockchains. It's designed for benchmarking and stress-testing EVM-based networks by generating a high volume of transactions. The tool uses an actor-based model for concurrency and can be configured to simulate various transaction workloads, such as simple ERC20 transfers or more complex decentralized exchange (DEX) swaps.
+`gravity_bench` is a high-performance transaction generator for Ethereum-compatible blockchains. It's designed for benchmarking and stress-testing EVM-based networks by generating a high volume of transactions. The tool uses an actor-based model for concurrency and can be configured to simulate various transaction workloads: simple ERC20 transfers, Uniswap V2 DEX swaps, or EIP-7702 type-4 SetCode self-sponsored delegations.
 
 ## Architecture
 
@@ -17,6 +17,7 @@ The benchmark workloads are defined using `TxnPlan`s. These are modular definiti
 *   Approving tokens for spending by a smart contract (e.g., a DEX router).
 *   Executing ERC20 token transfers.
 *   Swapping tokens on a Uniswap V2-style DEX.
+*   EIP-7702 SetCode self-sponsored delegations with ETH multi-send (type-4 txs).
 
 This design allows for creating flexible and complex benchmarking scenarios.
 
@@ -85,6 +86,8 @@ nodes = [
     { rpc_url = "http://localhost:8545", chain_id = 7771625 },
 ]
 num_tokens=2
+# Workload: "erc20" | "swap" | "eip7702"
+workload = "erc20"
 enable_swap_token = false
 # Faucet and deployer account configuration
 [faucet]
@@ -117,9 +120,38 @@ duration_secs = 60
 *   `faucet.private_key`: **IMPORTANT** - This account must have a sufficient balance of the native currency (e.g., ETH) to fund all the generated test accounts.
 *   `nodes.rpc_url`: The RPC endpoint of the Ethereum node.
 *   `target_tps`: The desired number of transactions per second.
-*   `enable_swap_token`: Set to `true` to benchmark Uniswap V2 swaps, or `false` for simple ERC20 transfers.
+*   `workload`: `"erc20"` (default), `"swap"`, or `"eip7702"`. Controls the stress workload.
+    *   `erc20` — ERC20 transfers (deploys tokens via `deploy.py`, cascade-funds ETH + tokens).
+    *   `swap` — Uniswap V2 swaps (also deploys router/liquidity).
+    *   `eip7702` — type-4 SetCode self-sponsored txs with **ETH multi-send**. Deploys `BatchExecutor` (`multiSend(address[],uint256[])`) from the faucet, cascade-funds ETH only (no ERC20). Each worker re-delegates to that template, then calls **itself** with `multiSend` to **4** pool recipients (1 gwei each by default). Funds circulate among workers. Sender nonce advances by **2** per inclusion.
+*   `enable_swap_token`: **Legacy**. Prefer `workload = "swap"`. Still honored when `workload` is omitted.
 *   `faucet.wait_duration_secs`: The number of seconds to wait between faucet distribution levels. If you encounter `insufficient funds` errors during the setup phase, increasing this value can help by allowing more time for transactions to be mined and account balances to be updated.
 *   `performance.duration_secs`: The duration of the benchmark in seconds. If set to `0`, the benchmark will run indefinitely.
+
+#### EIP-7702 example (`bench_config.toml`)
+
+```toml
+target_tps = 10
+workload = "eip7702"
+num_tokens = 0
+nodes = [
+    { rpc_url = "https://testnet-rpc.gravity.xyz", chain_id = <CHAIN_ID> },
+]
+[faucet]
+private_key = "..."
+faucet_level = 5
+wait_duration_secs = 5
+faucet_eth_balance = "10.0"
+[accounts]
+num_accounts = 100
+[performance]
+num_senders = 20
+max_pool_size = 1000
+duration_secs = 300
+sampling = 10
+```
+
+Requires Prague/Beta (EIP-7702 not locked down) on the target chain.
 
 ## Running the Benchmark
 

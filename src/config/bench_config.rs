@@ -12,6 +12,20 @@ pub enum AddressPoolType {
     Weighted,
 }
 
+/// Benchmark workload type.
+///
+/// - `erc20`: EIP-1559 ERC20 transfers (default)
+/// - `swap`: Uniswap V2 token swaps (also enabled via legacy `enable_swap_token = true`)
+/// - `eip7702`: EIP-7702 type-4 SetCode + ETH multiSend (self-sponsored)
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkloadType {
+    #[default]
+    Erc20,
+    Swap,
+    Eip7702,
+}
+
 /// Complete configuration structure
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BenchConfig {
@@ -22,7 +36,13 @@ pub struct BenchConfig {
     pub contract_config_path: String,
     pub num_tokens: usize,
     pub target_tps: u64,
+    /// Legacy flag. Prefer `workload = "swap"` instead.
+    /// Still honored when `workload` is omitted: `true` → swap, `false` → erc20.
+    #[serde(default)]
     pub enable_swap_token: bool,
+    /// Explicit workload selector. When set, overrides `enable_swap_token`.
+    #[serde(default)]
+    pub workload: Option<WorkloadType>,
     #[serde(default)]
     pub address_pool_type: AddressPoolType,
     #[serde(default = "default_log_path")]
@@ -133,5 +153,18 @@ impl BenchConfig {
             toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
 
         Ok(config)
+    }
+
+    /// Resolve the active workload, preferring explicit `workload` over the
+    /// legacy `enable_swap_token` flag.
+    pub fn resolved_workload(&self) -> WorkloadType {
+        if let Some(w) = self.workload {
+            return w;
+        }
+        if self.enable_swap_token {
+            WorkloadType::Swap
+        } else {
+            WorkloadType::Erc20
+        }
     }
 }

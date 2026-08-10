@@ -22,7 +22,11 @@ pub struct TxnMetadata {
     pub plan_id: PlanId,
     pub from_account: Arc<Address>,
     pub from_account_id: AccountId,
+    /// Tx sender nonce used for this transaction.
     pub nonce: u64,
+    /// How many nonces the chain advances for the sender after this tx is
+    /// included. Most txs use 1; self-sponsored EIP-7702 uses 2 (tx + auth).
+    pub nonce_increment: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -59,6 +63,12 @@ pub trait FromTxnConstructor: Send + Sync + 'static {
 
     /// Provide transaction description.
     fn description(&self) -> &'static str;
+
+    /// Nonce advance applied to the sender after this tx is included.
+    /// Override for workloads where the chain bumps more than once (e.g. EIP-7702 self-sponsor).
+    fn nonce_increment(&self) -> u32 {
+        1
+    }
 }
 
 pub trait ToTxnConstructor: Send + Sync + 'static {

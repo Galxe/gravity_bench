@@ -15,9 +15,10 @@ use std::{
 };
 use tracing::info;
 
-// Per-transaction gas cost budget (in wei). Bumped in lockstep with
-// BENCH_MAX_FEE_PER_GAS = 5000 Gwei × worst-case 100k gas = 5e17 wei = 0.5 ETH/txn.
-const GAS_COST_PER_TXN_BUDGET: u64 = 500_000_000_000_000_000;
+// Per-transaction gas cost budget (in wei). Keep in lockstep with
+// BENCH_MAX_FEE_PER_GAS × worst-case gas (EIP-7702 SetCode multiSend):
+// 1000 Gwei × 350_000 = 3.5e17 wei = 0.35 ETH/txn.
+const GAS_COST_PER_TXN_BUDGET: u64 = 350_000_000_000_000_000;
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();

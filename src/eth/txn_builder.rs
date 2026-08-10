@@ -8,14 +8,19 @@ use alloy::{
 use anyhow::Result;
 use tracing::debug;
 
-/// Max fee per gas for bench transactions (5000 Gwei).
+/// Max fee per gas for bench transactions (1000 Gwei).
 ///
-/// Must stay above Gravity's 50 Gwei protocol minimum base fee with enough
-/// headroom that the effective tip (max_priority_fee_per_gas) clears the
-/// gravity-reth txpool promotion threshold. Empirically, transactions with
-/// a 1 Gwei priority fee linger in the `queued` bucket and are never
-/// promoted to `pending`; a tip in the hundreds of Gwei is required.
-pub const BENCH_MAX_FEE_PER_GAS: u128 = 5_000_000_000_000;
+/// Must stay above Gravity's ~50 Gwei min base fee with headroom so that
+/// `max_priority_fee_per_gas` (500 Gwei) still fully applies:
+/// `effective_tip = min(tip, maxFee - baseFee)`. Tip must stay in the
+/// hundreds of Gwei range — empirically 1 Gwei never promotes out of
+/// gravity-reth's `queued` bucket.
+///
+/// Also kept low enough that worst-case EIP-7702 stress
+/// (`EIP7702_SET_CODE_GAS_LIMIT` × this) stays under the public RPC
+/// default `rpc.txfeecap` of 1 ETH: 350_000 × 1000 Gwei = 0.35 ETH.
+/// (Previously 5000 Gwei made 7702 reserve 1.75 ETH and testnet rejected it.)
+pub const BENCH_MAX_FEE_PER_GAS: u128 = 1_000_000_000_000;
 
 /// Priority fee (tip) for bench transactions (500 Gwei).
 ///

@@ -10,8 +10,8 @@ use crate::{
     txn_plan::{
         addr_pool::AddressPool,
         constructor::{
-            ApproveTokenConstructor, Erc20TransferConstructor, FaucetTreePlanBuilder,
-            SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
+            ApproveTokenConstructor, Eip7702Constructor, Erc20TransferConstructor,
+            FaucetTreePlanBuilder, SwapEthToTokenConstructor, SwapTokenToTokenConstructor,
         },
         faucet_txn_builder::FaucetTxnBuilder,
         plan::ManyToOnePlan,
@@ -112,6 +112,22 @@ impl PlanBuilder {
     ) -> Box<dyn TxnPlan> {
         let constructor =
             Erc20TransferConstructor::new(token_list, transfer_amount, chain_id, address_pool);
+        let plan = ManyToOnePlan::new(constructor, PlanExecutionMode::Partial(size));
+        let plan = plan.with_size(size);
+        Box::new(plan)
+    }
+
+    /// Create EIP-7702 self-sponsored SetCode + ETH multiSend plan.
+    ///
+    /// Each type-4 tx re-delegates the sender to `delegate` and calls the
+    /// sender EOA with `multiSend` to `batch_size` pool recipients.
+    pub fn eip7702_set_code(
+        chain_id: u64,
+        delegate: Address,
+        address_pool: Arc<dyn AddressPool>,
+        size: usize,
+    ) -> Box<dyn TxnPlan> {
+        let constructor = Eip7702Constructor::with_defaults(chain_id, delegate, address_pool);
         let plan = ManyToOnePlan::new(constructor, PlanExecutionMode::Partial(size));
         let plan = plan.with_size(size);
         Box::new(plan)
