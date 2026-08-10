@@ -287,6 +287,7 @@ async fn deploy_eip7702_delegate(
         .with_deploy_code(bytecode)
         .with_nonce(faucet_nonce)
         .with_chain_id(chain_id)
+        // 500k × 1000 Gwei = 0.5 ETH < public RPC 1 ETH txfeecap
         .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
         .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
         .with_gas_limit(EIP7702_DELEGATE_DEPLOY_GAS_LIMIT);
@@ -550,6 +551,9 @@ async fn start_bench() -> Result<()> {
     //     fees outside the cascade) to scale the cascade UP to what's actually
     //     available, rather than under-using a well-funded faucet.
     // The FaucetTreePlanBuilder assert is the final backstop for absurd inputs.
+    // Always honor configured faucet_eth_balance (clamped to on-chain).
+    // Previously we scaled UP to 99% of on-chain when configured < balance; that
+    // drained a shared multi-process faucet in one leg and broke the others.
     let effective_faucet_eth = if on_chain_faucet_balance < configured_faucet_eth {
         tracing::warn!(
             "faucet_eth_balance ({}) exceeds on-chain balance ({}); clamping down.",
@@ -557,15 +561,6 @@ async fn start_bench() -> Result<()> {
             on_chain_faucet_balance
         );
         on_chain_faucet_balance
-    } else if configured_faucet_eth < on_chain_faucet_balance {
-        // Configured is smaller than on-chain. Scale the cascade up to (on-chain - 1%)
-        // so a well-funded faucet isn't under-used; the 1% headroom covers misc fees
-        // outside the cascade.
-        // Note: if on_chain == 0, headroom == 0 and usable == 0 — the cascade builder's
-        // assert will catch this with a clear panic before any U256 underflow.
-        let headroom = on_chain_faucet_balance / U256::from(100);
-        let usable = on_chain_faucet_balance - headroom;
-        usable
     } else {
         configured_faucet_eth
     };
