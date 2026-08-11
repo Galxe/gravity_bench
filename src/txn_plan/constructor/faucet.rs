@@ -1,9 +1,12 @@
 use crate::{
+    eth::gas_fees,
     txn_plan::{
         faucet_plan::LevelFaucetPlan, faucet_txn_builder::FaucetTxnBuilder, traits::TxnPlan,
     },
     util::gen_account::{AccountGenerator, AccountId},
 };
+
+use super::eip7702::EIP7702_SET_CODE_GAS_LIMIT;
 use alloy::{
     primitives::{Address, U256},
     signers::local::PrivateKeySigner,
@@ -15,10 +18,12 @@ use std::{
 };
 use tracing::info;
 
-// Per-transaction gas cost budget (in wei). Keep in lockstep with
-// BENCH_MAX_FEE_PER_GAS × worst-case gas (EIP-7702 SetCode multiSend):
-// 1000 Gwei × 350_000 = 3.5e17 wei = 0.35 ETH/txn.
-const GAS_COST_PER_TXN_BUDGET: u64 = 350_000_000_000_000_000;
+/// Per-transaction gas cost budget (wei) for cascade leaf math.
+/// Locksteps to runtime `maxFee × EIP7702_SET_CODE_GAS_LIMIT` (worst-case
+/// mempool reserve among workloads).
+fn gas_cost_per_txn_budget() -> U256 {
+    U256::from(gas_fees().reserve_wei(EIP7702_SET_CODE_GAS_LIMIT))
+}
 
 static NONCE_MAP: std::sync::OnceLock<Arc<Mutex<HashMap<Address, Arc<AtomicU64>>>>> =
     std::sync::OnceLock::new();
@@ -60,7 +65,13 @@ impl<T: FaucetTxnBuilder + 'static> FaucetTreePlanBuilder<T> {
         let round_total_accounts_num = degree.pow(total_levels as u32);
 
         let degree_u256 = U256::from(degree);
-        let gas_cost_per_txn = U256::from(GAS_COST_PER_TXN_BUDGET);
+        let gas_cost_per_txn = gas_cost_per_txn_budget();
+        info!(
+            "Faucet gas_cost_per_txn_budget={} wei (maxFee_gwei={} × gasLimit={})",
+            gas_cost_per_txn,
+            gas_fees().max_fee_gwei(),
+            EIP7702_SET_CODE_GAS_LIMIT
+        );
 
         let (amount_per_recipient, intermediate_funding_amounts) = if total_levels > 1 {
             // This is a multi-level distribution.

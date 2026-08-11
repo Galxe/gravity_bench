@@ -47,6 +47,51 @@ pub struct BenchConfig {
     pub address_pool_type: AddressPoolType,
     #[serde(default = "default_log_path")]
     pub log_path: String,
+    /// EIP-1559 fee caps (tip / maxFee). Defaults: tip 500 Gwei, maxFee 1000 Gwei.
+    #[serde(default)]
+    pub fee: FeeConfig,
+}
+
+/// EIP-1559 fee parameters (Gwei units in toml for readability).
+///
+/// Applied process-wide via `eth::init_gas_fees` after config load.
+/// Faucet cascade gas budget auto-locksteps to
+/// `max_fee_per_gas × EIP7702_SET_CODE_GAS_LIMIT` (worst-case mempool reserve).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FeeConfig {
+    /// `maxFeePerGas` in Gwei (default 1000).
+    #[serde(default = "default_max_fee_gwei")]
+    pub max_fee_per_gas_gwei: u64,
+    /// `maxPriorityFeePerGas` (tip) in Gwei (default 500).
+    #[serde(default = "default_priority_fee_gwei")]
+    pub max_priority_fee_per_gas_gwei: u64,
+}
+
+impl Default for FeeConfig {
+    fn default() -> Self {
+        Self {
+            max_fee_per_gas_gwei: default_max_fee_gwei(),
+            max_priority_fee_per_gas_gwei: default_priority_fee_gwei(),
+        }
+    }
+}
+
+fn default_max_fee_gwei() -> u64 {
+    1000
+}
+
+fn default_priority_fee_gwei() -> u64 {
+    500
+}
+
+impl FeeConfig {
+    /// Convert to runtime wei-based fee caps.
+    pub fn to_gas_fees(&self) -> crate::eth::GasFees {
+        crate::eth::GasFees::from_gwei(
+            self.max_fee_per_gas_gwei,
+            self.max_priority_fee_per_gas_gwei,
+        )
+    }
 }
 
 fn default_log_path() -> String {
@@ -151,6 +196,12 @@ impl BenchConfig {
 
         let config: BenchConfig =
             toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
+
+        config
+            .fee
+            .to_gas_fees()
+            .validate()
+            .map_err(|e| anyhow::anyhow!("invalid [fee] config: {}", e))?;
 
         Ok(config)
     }

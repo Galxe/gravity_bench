@@ -16,6 +16,7 @@ workload = "erc20"
 enable_swap_token = false
 # Address pool type: "random" (default) or "weighted" (hot/normal/long-tail distribution)
 address_pool_type = "random"
+
 # Faucet and deployer account configuration
 [faucet]
 # Private key (example, please replace with real private key, the follows is a example of reth)
@@ -49,3 +50,12 @@ duration_secs = 60
 # Sampling strategy: integer (transaction count) or "full" (check all pending)
 # Default is 10
 sampling = 20
+
+# EIP-1559 fee caps (Gwei). Applied to all workloads + faucet cascade.
+# Put [fee] AFTER top-level keys (e.g. nodes=); never before bare keys like nodes.
+# Defaults: tip 500 / maxFee 1000. Faucet gas budget auto-locksteps to
+# max_fee × 350_000 (EIP-7702 gasLimit). Keep max_fee ≥ tip; for Gravity
+# min baseFee ~50 Gwei use max_fee ≥ tip + 50 so the tip fully applies.
+[fee]
+max_fee_per_gas_gwei = 1000
+max_priority_fee_per_gas_gwei = 500

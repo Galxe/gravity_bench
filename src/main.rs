@@ -26,11 +26,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 use crate::{
     actors::{consumer::Consumer, producer::Producer, Monitor, RegisterTxnPlan},
     config::{BenchConfig, ContractConfig, WorkloadType},
-    eth::{EthHttpCli, TxnBuilder, BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
+    eth::{gas_fees, init_gas_fees, EthHttpCli, TxnBuilder},
     txn_plan::{
         addr_pool::AddressPool,
         constructor::{
             delegate_contract_bytecode, FaucetTreePlanBuilder, EIP7702_DELEGATE_DEPLOY_GAS_LIMIT,
+            EIP7702_SET_CODE_GAS_LIMIT,
         },
         faucet_txn_builder::{Erc20FaucetTxnBuilder, EthFaucetTxnBuilder, FaucetTxnBuilder},
         PlanBuilder, TxnPlan,
@@ -282,14 +283,15 @@ async fn deploy_eip7702_delegate(
     let faucet_addr = signer.address();
     let bytecode = Bytes::from(delegate_contract_bytecode());
 
+    let fees = gas_fees();
     let tx_request = alloy::rpc::types::TransactionRequest::default()
         .with_from(faucet_addr)
         .with_deploy_code(bytecode)
         .with_nonce(faucet_nonce)
         .with_chain_id(chain_id)
-        // 500k × 1000 Gwei = 0.5 ETH < public RPC 1 ETH txfeecap
-        .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
-        .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+        // Keep gasLimit × maxFee under public RPC txfeecap (default 1 ETH).
+        .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas)
+        .with_max_fee_per_gas(fees.max_fee_per_gas)
         .with_gas_limit(EIP7702_DELEGATE_DEPLOY_GAS_LIMIT);
 
     let envelope = TxnBuilder::build_and_sign_transaction(tx_request, &signer)?;
@@ -401,6 +403,10 @@ async fn start_bench() -> Result<()> {
     assert!(benchmark_config.accounts.num_accounts >= benchmark_config.target_tps as usize);
     let workload = benchmark_config.resolved_workload();
 
+    // Install process-wide EIP-1559 fee caps from `[fee]` (defaults: tip 500 / maxFee 1000 Gwei).
+    let fees = benchmark_config.fee.to_gas_fees();
+    init_gas_fees(fees);
+
     // Initialize tracing
     let log_path = benchmark_config.log_path.trim();
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -446,6 +452,13 @@ async fn start_bench() -> Result<()> {
     };
 
     info!("Resolved workload: {:?}", workload);
+    info!(
+        "Fee caps: max_priority_fee={} Gwei, max_fee={} Gwei (7702 reserve ≈ {} wei @ gasLimit {})",
+        fees.tip_gwei(),
+        fees.max_fee_gwei(),
+        fees.reserve_wei(EIP7702_SET_CODE_GAS_LIMIT),
+        EIP7702_SET_CODE_GAS_LIMIT,
+    );
 
     // contract_config is only required for erc20 / swap workloads.
     // eip7702 only needs ETH funding + a delegate target contract.
@@ -621,9 +634,10 @@ async fn start_bench() -> Result<()> {
     let remained_eth = match workload {
         WorkloadType::Eip7702 => U256::ZERO,
         WorkloadType::Erc20 | WorkloadType::Swap => {
+            // Headroom for later token ops: num_tokens × 21k × maxFee.
             U256::from(benchmark_config.num_tokens)
-                * U256::from(21000)
-                * U256::from(1000_000_000_000u64)
+                * U256::from(21_000u64)
+                * U256::from(gas_fees().max_fee_per_gas)
         }
     };
     let eth_faucet_builder = PlanBuilder::create_faucet_tree_plan_builder(

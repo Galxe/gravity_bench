@@ -1,6 +1,6 @@
 use crate::{
     config::IERC20,
-    eth::{BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
+    eth::gas_fees,
     txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
     util::gen_account::{AccountId, AccountManager},
 };
@@ -50,6 +50,7 @@ impl FromTxnConstructor for Erc20TransferConstructor {
         let call_data = Bytes::from(call_data);
         let token_idx = rand::random::<usize>() % self.token_list.len();
         let token_address = self.token_list[token_idx];
+        let fees = gas_fees();
         // create transaction request
         let tx_request = TransactionRequest::default()
             .with_from(from_address)
@@ -57,8 +58,8 @@ impl FromTxnConstructor for Erc20TransferConstructor {
             .with_input(call_data)
             .with_nonce(nonce)
             .with_chain_id(self.chain_id)
-            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
-            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+            .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas)
+            .with_max_fee_per_gas(fees.max_fee_per_gas)
             .with_gas_limit(100_000); // Standard gas for ERC20 transfer
 
         Ok(tx_request)
