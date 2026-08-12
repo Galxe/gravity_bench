@@ -18,7 +18,18 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 # ~baseFee + 1 Gwei which is below the threshold and leaves deploy txs
 # stuck in `queued`. Kept under the 1 ETH RPC txfeecap for typical
 # contract gas limits.
-DEPLOY_GAS_PRICE_WEI = 800_000_000_000  # 800 Gwei
+DEPLOY_GAS_PRICE_WEI = 100_000_000_000  # 100 gwei; clamp_gas_price() enforces <1 ETH fee
+
+def clamp_gas_price(gas_limit, gas_price=None):
+    """Keep gas*price under public RPC txfeecap (1 ETH)."""
+    if gas_price is None:
+        gas_price = DEPLOY_GAS_PRICE_WEI
+    max_fee_wei = 10**18 - 10**15
+    if gas_limit and gas_price * gas_limit > max_fee_wei:
+        gas_price = max_fee_wei // gas_limit
+        print(f"  (clamped gasPrice to {gas_price} wei for gas_limit={gas_limit})")
+    return gas_price
+
 
 def filter_abi(full_abi, function_names):
     """Filters an ABI, keeping only specified functions and essential parts like the constructor."""
@@ -141,6 +152,8 @@ def deploy_contract(w3, account, private_key, contract_interface, contract_name,
     except Exception:
         gas_limit = 5_000_000  # Fallback Gas
 
+    gas_price = clamp_gas_price(gas_limit, gas_price)
+
     tx = Contract.constructor(*args).build_transaction({
         'from': account.address, 'nonce': nonce,
         'gas': gas_limit, 'gasPrice': gas_price
@@ -166,7 +179,7 @@ def approve_token(w3, account, private_key, token_contract, spender_address, tok
         'from': account.address,
         'nonce': w3.eth.get_transaction_count(account.address),
         'gas': 100000,
-        'gasPrice': DEPLOY_GAS_PRICE_WEI
+        'gasPrice': clamp_gas_price(100000)
     })
     
     return send_transaction(w3, tx, private_key, f"Approve {token_symbol}") is not None
@@ -186,7 +199,7 @@ def add_liquidity(w3, account, private_key, router_contract, token_a_info, token
         0, 0, account.address, deadline
     ).build_transaction({
         'from': account.address, 'nonce': w3.eth.get_transaction_count(account.address),
-        'gas': 3_000_000, 'gasPrice': DEPLOY_GAS_PRICE_WEI
+        'gas': 3_000_000, 'gasPrice': clamp_gas_price(3_000_000)
     })
     
     receipt = send_transaction(w3, tx, private_key, f"Add Liquidity for {pair_name}")
@@ -207,7 +220,7 @@ def add_liquidity_eth(w3, account, private_key, router_contract, token_info):
     ).build_transaction({
         'from': account.address, 'value': eth_amount,
         'nonce': w3.eth.get_transaction_count(account.address),
-        'gas': 3_000_000, 'gasPrice': DEPLOY_GAS_PRICE_WEI
+        'gas': 3_000_000, 'gasPrice': clamp_gas_price(3_000_000)
     })
     
     receipt = send_transaction(w3, tx, private_key, f"Add Liquidity for {pair_name}")
@@ -307,12 +320,16 @@ def main(args):
     print("\n--- Generating Output File ---")
     final_token_list = []
     for token in deployed_tokens:
+        # Use on-chain balance (liquidity consumes tokens; planning from
+        # initial_supply over-distributes and the last transfer reverts).
+        on_chain_bal = token["contract"].functions.balanceOf(account.address).call()
         final_token_list.append({
             "symbol": token["symbol"],
             "address": token["address"],
             "faucet_address": account.address,
-            "faucet_balance": str(initial_supply),
+            "faucet_balance": str(on_chain_bal),
         })
+        print(f"  faucet_balance {token['symbol']}: {on_chain_bal} (on-chain after deploy/LP)")
 
     final_results = {
         "addresses": {

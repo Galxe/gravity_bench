@@ -7,7 +7,7 @@ use alloy::{
 
 use crate::{
     config::IERC20,
-    eth::{BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
+    eth::gas_fees,
     txn_plan::traits::FromTxnConstructor,
     util::gen_account::{AccountId, AccountManager},
 };
@@ -39,6 +39,7 @@ impl FromTxnConstructor for ApproveTokenConstructor {
         let call_data = approve_call.abi_encode();
         let call_data = Bytes::from(call_data);
         let from_address = account_generator.get_address_by_id(from_account_id);
+        let fees = gas_fees();
         // create transaction request
         let tx_request = TransactionRequest::default()
             .with_from(from_address)
@@ -46,8 +47,8 @@ impl FromTxnConstructor for ApproveTokenConstructor {
             .with_input(call_data)
             .with_nonce(nonce)
             .with_chain_id(self.chain_id)
-            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
-            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+            .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas)
+            .with_max_fee_per_gas(fees.max_fee_per_gas)
             .with_gas_limit(100_000); // Standard gas for approve
 
         Ok(tx_request)

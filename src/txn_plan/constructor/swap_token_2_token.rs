@@ -1,6 +1,6 @@
 use crate::{
     config::{IUniswapV2Router, LiquidityPair},
-    eth::{BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
+    eth::gas_fees,
     txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
     util::gen_account::{AccountId, AccountManager},
 };
@@ -61,14 +61,15 @@ impl FromTxnConstructor for SwapTokenToTokenConstructor {
         };
         let call_data = swap_call.abi_encode();
         let call_data = Bytes::from(call_data);
+        let fees = gas_fees();
         let tx_request = TransactionRequest::default()
             .with_from(from_address)
             .with_to(self.router_address)
             .with_input(call_data)
             .with_nonce(nonce)
             .with_chain_id(self.chain_id)
-            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
-            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+            .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas)
+            .with_max_fee_per_gas(fees.max_fee_per_gas)
             .with_gas_limit(100_000); // Standard gas for ETH transfer
         Ok(tx_request)
     }

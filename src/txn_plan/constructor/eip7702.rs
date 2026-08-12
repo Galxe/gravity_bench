@@ -1,5 +1,5 @@
 use crate::{
-    eth::{BENCH_MAX_FEE_PER_GAS, BENCH_MAX_PRIORITY_FEE_PER_GAS},
+    eth::gas_fees,
     txn_plan::{addr_pool::AddressPool, FromTxnConstructor},
     util::gen_account::{AccountId, AccountManager},
 };
@@ -110,14 +110,15 @@ impl FromTxnConstructor for Eip7702Constructor {
         // Critical: `to` must be the EOA so delegated runtime runs in EOA
         // context and multiSend spends the EOA's ETH. Calling the template
         // address would execute with address(this) == template.
+        let fees = gas_fees();
         let tx_request = TransactionRequest::default()
             .with_from(from_address)
             .with_to(from_address)
             .with_input(call_data)
             .with_nonce(nonce)
             .with_chain_id(self.chain_id)
-            .with_max_priority_fee_per_gas(BENCH_MAX_PRIORITY_FEE_PER_GAS)
-            .with_max_fee_per_gas(BENCH_MAX_FEE_PER_GAS)
+            .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas)
+            .with_max_fee_per_gas(fees.max_fee_per_gas)
             .with_gas_limit(EIP7702_SET_CODE_GAS_LIMIT)
             .with_authorization_list(vec![signed_auth]);
 
